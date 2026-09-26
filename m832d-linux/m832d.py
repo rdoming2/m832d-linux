@@ -45,7 +45,7 @@ class LZO:
             raise RuntimeError('Compression round-trip failed')
         return result
 
-def encode_image(path, width=576, threshold=160, preview=None):
+def encode_image(path, width=576, threshold=160, preview=None, compression="lzo"):
     from PIL import Image, ImageOps
     with Image.open(path) as source:
         rgba = ImageOps.exif_transpose(source).convert('RGBA')
@@ -63,6 +63,11 @@ def encode_image(path, width=576, threshold=160, preview=None):
         raise ValueError('Image height must be 1..65535 pixels')
     if preview:
         ImageOps.invert(black_bits.convert('L')).save(preview)
+    header = b'\x1d\x76\x30\x00' + struct.pack('<HH', width//8, canvas.height)
+    if compression == 'none':
+        return SETUP[:-1] + b'\x00' + header + raw + FOOTER
+    if compression != 'lzo':
+        raise ValueError('Unknown compression mode')
     lzo = LZO()
     blocks = []
     for offset in range(0, len(raw), 4096):
@@ -71,11 +76,17 @@ def encode_image(path, width=576, threshold=160, preview=None):
     return SETUP + b'\x1d\x76\x30\x00' + struct.pack('<HH', width//8, canvas.height) + b''.join(blocks) + FOOTER
 
 def validate(job):
-    if not job.startswith(SETUP + b'\x1d\x76\x30\x00') or not job.endswith(FOOTER):
+    if (len(job) < 36 or job[:21] != SETUP[:21] or job[21] not in (0, 1)
+            or job[22:26] != b'\x1d\x76\x30\x00' or not job.endswith(FOOTER)):
         raise ValueError('Not a supported M832D image job')
     row_bytes, height = struct.unpack_from('<HH', job, 26)
     if not row_bytes or not height:
         raise ValueError('Empty raster')
+    if job[21] == 0:
+        raw = job[30:-6]
+        if len(raw) != row_bytes*height:
+            raise ValueError('Uncompressed raster size mismatch')
+        return row_bytes*8, height, raw
     pos, raw, lzo = 30, bytearray(), LZO()
     while pos < len(job)-6:
         if pos+3 > len(job)-6:
@@ -218,16 +229,18 @@ def main():
             p.add_argument('--width', type=int, default=576, help='Canvas pixels; 576 is capture-verified')
             p.add_argument('--threshold', type=int, default=160)
             p.add_argument('--preview', type=Path)
+            p.add_argument('--compression', choices=['lzo', 'none'], default='lzo',
+                           help='Raster encoding; none tests the CUPS filter’s uncompressed mode')
         if name == 'encode':
             p.add_argument('output', type=Path)
         else:
             p.add_argument('--debug', action='store_true', help='Log Bleak details and full error traceback')
             p.add_argument('--address', help='Optional Bluetooth MAC to select the printer')
-            p.add_argument('--write-mode', choices=['command', 'request'], default='command',
-                           help='request waits for ATT acknowledgments; experimental diagnostic mode')
+            p.add_argument('--write-mode', choices=['command', 'request'], default='request',
+                           help='request waits for ATT acknowledgments (default); command uses unacknowledged writes')
             p.add_argument('--chunk-size', type=int, default=182)
-            p.add_argument('--delay-ms', type=float, default=20)
-            p.add_argument('--wait', type=float, default=10)
+            p.add_argument('--delay-ms', type=float, default=0)
+            p.add_argument('--wait', type=float, default=30)
     args = parser.parse_args()
     if getattr(args, 'debug', False):
         import logging
@@ -236,9 +249,9 @@ def main():
         parser.error('Width must be a multiple of 8 in 8..65528; threshold must be 0..255')
     if args.command != 'encode' and (args.chunk_size < 1 or not 0 <= args.delay_ms <= 60000 or not 0 <= args.wait <= 3600):
         parser.error('Invalid chunk size, delay, or wait')
-    job = args.input.read_bytes() if args.command == 'replay' else encode_image(args.input, args.width, args.threshold, args.preview)
+    job = args.input.read_bytes() if args.command == 'replay' else encode_image(args.input, args.width, args.threshold, args.preview, args.compression)
     width, height, _ = validate(job)
-    print(f'{width} × {height} pixels; {len(job)} job bytes')
+    print(f'{width} × {height} pixels; {len(job)} job bytes; compression={"lzo" if job[21] else "none"}')
     if args.command == 'encode':
         args.output.write_bytes(job)
         print(f'Saved {args.output}')
