@@ -2,6 +2,11 @@
 
 This script sends the image protocol decoded from your iPhone capture through Bleak/BlueZ. It also encodes PNG/JPEG and other Pillow-readable images into the same format. No kernel driver is needed.
 
+This repository now also contains the first offline-tested implementation of a
+`m832dble` CUPS backend. It requires the manufacturer PPD and `rastertoM08F`
+filter to be installed separately. Deployment and hardware validation remain
+explicit administrator actions; see `docs/OPERATIONS.md`.
+
 ## Install and first print
 
 On your Arch system, `python-bleak`, `python-pillow`, and `lzo` are required. They were already available in the environment used to build this script. If needed:
@@ -64,3 +69,16 @@ python -m unittest discover -p test_encoder.py -v
 The acknowledged-write configuration has printed short and larger standalone jobs on the development printer. `01 01` and the other observed notifications still have provisional meanings and must not be treated as completion evidence.
 
 For CUPS, retain the working USB queue. The manufacturer filter emits uncompressed M832 raster data and depends on CUPS back-channel status replies and side-channel drain requests. The planned `m832dble` backend transports that output unchanged; it must not pass it through this script's mobile-job validator or prepend the captured setup sequence. See `M832D-BLE-Backend-BRD.md` for the release requirements.
+
+## Backend development
+
+Run all offline tests with:
+
+```sh
+python -m unittest discover -v
+```
+
+The backend modules are under `src/m832d_ble`. They separate strict device URI
+handling, CUPS channels, explicit-LE transport, bounded job streaming, locking,
+and outcome policy. The test suite includes a subprocess harness that assigns
+the same fd 3/fd 4 channels used by a real CUPS filter.
