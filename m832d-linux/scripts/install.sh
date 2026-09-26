@@ -47,15 +47,13 @@ if ! "$PYTHON" -c 'import ctypes.util, sys; sys.exit(0 if ctypes.util.find_libra
     exit 1
 fi
 
-PURELIB=$(
-    "$PYTHON" - "$PREFIX" <<'PY'
-import sys
+PURELIB=${PYTHON_LIB:-$(
+    "$PYTHON_PATH" - <<'PY'
 import sysconfig
 
-prefix = sys.argv[1]
-print(sysconfig.get_path('purelib', vars={'base': prefix, 'platbase': prefix}))
+print(sysconfig.get_path('purelib'))
 PY
-)
+)}
 PACKAGE_DIR="$DESTDIR$PURELIB/m832d_ble"
 BACKEND_DIR="$DESTDIR$CUPS_SERVERBIN/backend"
 BIN_DIR="$DESTDIR$PREFIX/bin"
@@ -76,6 +74,7 @@ chmod 0755 "$BACKEND_DIR/m832dble" "$BIN_DIR/m832dble-diagnose"
 
 printf 'Installed backend: %s\n' "$BACKEND_DIR/m832dble"
 printf 'Installed diagnostic: %s\n' "$BIN_DIR/m832dble-diagnose"
+printf 'Installed Python package: %s\n' "$PACKAGE_DIR"
 printf 'CUPS version: %s\n' "$(cups-config --version)"
 "$PYTHON_PATH" - <<'PY'
 from importlib.metadata import version

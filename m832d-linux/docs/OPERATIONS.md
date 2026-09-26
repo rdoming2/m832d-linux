@@ -21,8 +21,10 @@ review and then run:
 sudo ./scripts/install.sh
 ```
 
-`PREFIX`, `DESTDIR`, `PYTHON`, and `CUPS_SERVERBIN` can override detected
-installation paths. If CUPS does not list the manufacturer PPD, provide its
+`PREFIX`, `DESTDIR`, `PYTHON`, `PYTHON_LIB`, and `CUPS_SERVERBIN` can override
+detected installation paths. The backend package is installed into the selected
+interpreter's default `purelib` directory; `PREFIX` controls the diagnostic
+command location. If CUPS does not list the manufacturer PPD, provide its
 existing path as `M832D_PPD=/path/to/M832D.ppd`. Package staging can provide the
 host filter path as `M832D_FILTER=/usr/lib/cups/filter/rastertoM08F`; `DESTDIR`
 applies only to files installed by this project. The installer does not restart

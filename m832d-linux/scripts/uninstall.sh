@@ -11,15 +11,19 @@ if ! command -v cups-config >/dev/null 2>&1; then
 fi
 
 CUPS_SERVERBIN=${CUPS_SERVERBIN:-$(cups-config --serverbin)}
-PURELIB=$(
-    "$PYTHON" - "$PREFIX" <<'PY'
-import sys
+PYTHON_PATH=$(command -v "$PYTHON" || true)
+if [ -z "$PYTHON_PATH" ]; then
+    printf 'ERROR: Python interpreter not found: %s\n' "$PYTHON" >&2
+    exit 1
+fi
+
+PURELIB=${PYTHON_LIB:-$(
+    "$PYTHON_PATH" - <<'PY'
 import sysconfig
 
-prefix = sys.argv[1]
-print(sysconfig.get_path('purelib', vars={'base': prefix, 'platbase': prefix}))
+print(sysconfig.get_path('purelib'))
 PY
-)
+)}
 
 rm -f "$DESTDIR$CUPS_SERVERBIN/backend/m832dble"
 rm -f "$DESTDIR$PREFIX/bin/m832dble-diagnose"
