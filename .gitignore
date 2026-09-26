@@ -4,4 +4,6 @@ log
 *.pcap
 *.ppd
 
+__pycache__
+
 images/
