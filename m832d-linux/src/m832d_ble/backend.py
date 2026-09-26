@@ -81,6 +81,11 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
             connecting = False
             info(f'job {invocation.job_id}: BLE ready; transmitting vendor-filter output')
             await runtime.run()
+            if runtime.back_channel_closed:
+                info(
+                    f'job {invocation.job_id}: filter closed the back channel; '
+                    'remaining notifications were discarded'
+                )
             info(
                 f'job {invocation.job_id}: submitted={transport.submitted_bytes} '
                 f'acknowledged={transport.acknowledged_bytes} '

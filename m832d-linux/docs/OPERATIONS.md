@@ -61,6 +61,7 @@ installed M832D PPD and use an explicit address and adapter. For example:
 sudo lpadmin -p M832D-BLE -E \
   -v 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0' \
   -P /path/to/the/installed/M832D.ppd \
+  -o PageSize=w53h70 \
   -o printer-error-policy=stop-printer
 ```
 
@@ -68,6 +69,18 @@ Use the PPD already installed on the host; do not copy it from this repository
 for redistribution. Confirm the resulting queue does not replace or rename the
 USB queue. The `stop-printer` policy is intentional: a backend failure after
 submission is uncertain and must not silently replay a whole job.
+
+The initial BLE validation target is the PPD's `w53h70` media choice. The
+manufacturer PPD itself defaults to A4, so select `w53h70` explicitly when an
+application supplies its own media setting. For a controlled test:
+
+```sh
+lp -d M832D-BLE -o PageSize=w53h70 -o fit-to-page document.pdf
+```
+
+An A4 job produces roughly a megabyte of uncompressed raster and commands a
+much longer feed than the capture-validated 53 mm workflow. A4 is not currently
+a BLE release target.
 
 ## Outcome and recovery
 
@@ -113,5 +126,8 @@ sudo lpadmin -x M832D-BLE
 - Its raster-path drain timeout is approximately 100 ms and may be shorter than
   a 4096-byte acknowledged BLE transfer. The backend returns a side-channel
   timeout before that deadline rather than sending a stale success response.
+- The vendor filter deliberately emits uncompressed raster for M832. Backend
+  LZO conversion is not enabled; it requires protocol-aware drain accounting
+  and separate full-page validation.
 - Physical completion semantics for observed notifications are not established.
 - Classic PPD/filter workflows are deprecated in newer CUPS versions.

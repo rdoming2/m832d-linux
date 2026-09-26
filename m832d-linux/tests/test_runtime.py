@@ -153,13 +153,22 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await runtime.run()
         self.assertEqual(channels.back, values)
 
-    async def test_back_channel_failure_fails_job(self):
+    async def test_closed_back_channel_does_not_abort_emitted_output(self):
         channels = FakeChannels(back_error=BrokenPipeError('closed'))
+        runtime = BackendRuntime(
+            FakeTransport(), channels, BytesIO(b'print data'), asyncio.Event(),
+        )
+        runtime.notification(b'\x1a\x0f\x0c')
+        await runtime.run()
+        self.assertTrue(runtime.back_channel_closed)
+
+    async def test_unexpected_back_channel_failure_fails_job(self):
+        channels = FakeChannels(back_error=OSError(5, 'I/O error'))
         runtime = BackendRuntime(
             FakeTransport(), channels, BytesIO(b''), asyncio.Event(),
         )
         runtime.notification(b'\x1a\x0f\x0c')
-        with self.assertRaises(BrokenPipeError):
+        with self.assertRaises(OSError):
             await runtime.run()
 
     async def test_side_channel_failure_fails_job(self):

@@ -1,5 +1,6 @@
 """Bounded job streaming and CUPS channel coordination."""
 import asyncio
+import errno
 import os
 import stat
 
@@ -66,6 +67,7 @@ class BackendRuntime:
         self._channel_error = None
         self._channel_failed = asyncio.Event()
         self._side_idle = asyncio.Event()
+        self.back_channel_closed = False
 
     def notification(self, data):
         if self._stopping.is_set():
@@ -195,7 +197,17 @@ class BackendRuntime:
             try:
                 if data is None:
                     return
-                await asyncio.to_thread(self.channels.write_back, data)
+                if self.back_channel_closed:
+                    continue
+                try:
+                    await asyncio.to_thread(self.channels.write_back, data)
+                except OSError as exc:
+                    if (not isinstance(exc, BrokenPipeError)
+                            and exc.errno not in (errno.EBADF, errno.EPIPE)):
+                        raise
+                    # The filter has closed fd 3 and cannot consume further
+                    # notifications. Continue sending output it already emitted.
+                    self.back_channel_closed = True
             finally:
                 self.notifications.task_done()
 

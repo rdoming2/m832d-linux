@@ -7,6 +7,11 @@ This repository now also contains the first offline-tested implementation of a
 filter to be installed separately. Deployment and hardware validation remain
 explicit administrator actions; see `docs/OPERATIONS.md`.
 
+The initial CUPS/BLE media target is the PPD's `w53h70` (approximately 53 × 70
+mm) choice, matching the workflow used to derive the standalone sender. The
+manufacturer PPD defaults to A4; the BLE queue and test jobs must override that
+default. A4 output is currently outside the validated BLE scope.
+
 ## Install and first print
 
 On your Arch system, `python-bleak`, `python-pillow`, and `lzo` are required. They were already available in the environment used to build this script. If needed:

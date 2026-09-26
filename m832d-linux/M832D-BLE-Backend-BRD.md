@@ -45,6 +45,7 @@ The project owner approves scope, deployment, and release acceptance. One person
 ### In scope for the first release
 
 - One M832D printer on the existing Linux/BlueZ host, with explicit printer identity and adapter selection where needed.
+- Initial media validation uses the PPD's `w53h70` choice (approximately 53 × 70 mm), matching the capture-tested workflow.
 - Reuse of the existing PPD and rastertoM08F filter.
 - Unmodified filter output carried over BLE, subject to successful compatibility testing.
 - Notification delivery to the filter through the CUPS back channel.
@@ -61,6 +62,7 @@ The project owner approves scope, deployment, and release acceptance. One person
 - Guaranteed exactly-once physical printing across loss of connection or power.
 - Automatic printer firmware updates, system-wide Bluetooth mode changes, or removal of the USB queue.
 - Broad CUPS-version support beyond the documented, tested host configuration.
+- A4 over BLE until its substantially larger uncompressed stream, feed behavior, and physical output are separately approved.
 
 ## 6. Required user journeys
 
@@ -127,7 +129,7 @@ The backend must also service CUPS side-channel requests while transmitting and 
 
 Initial transport settings are acknowledged writes, no artificial inter-write delay, and a maximum requested chunk size of 182 bytes. These settings are a tested starting point, not universal printer limits. The vendor output must not pass through the standalone sender's fixed SETUP/FOOTER validator or have the mobile-app setup prepended automatically.
 
-The PPD specifies 300 dpi and default A4. The standalone encoder's 576-pixel canvas must not limit CUPS output. Full-size pages will be substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior should remain owned by the existing CUPS/filter pipeline.
+The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queue must override it with `w53h70`. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
 
 ## 11. Delivery phases and gates
 
@@ -145,8 +147,8 @@ Queue creation, privileged installation, and changes to service configuration ar
 
 | Test | Required result |
 |---|---|
-| One-page text PDF at driver defaults | Complete, readable page; media size and positioning agree with the USB reference. |
-| Full-page image/graphics document | Complete output without the earlier short partial-print behavior; no unexplained data loss. |
+| One-page text PDF using `w53h70` | Complete, readable page; media size and positioning agree with the USB reference. |
+| Full 53 × 70 mm image/graphics document | Complete output without the earlier short partial-print behavior; no unexplained data loss. |
 | Three-page document | Correct order and count, correct page/feed behavior, no merged or missing pages. |
 | Five consecutive jobs | All print once without manual reconnection or repeated pairing prompts. |
 | Printer power cycle between jobs | Existing bond works, explicit LE reconnect succeeds, and the next job prints. |
@@ -179,7 +181,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 2. Installation will require an independently installed manufacturer PPD and `rastertoM08F` filter. The BLE package will not redistribute or build the vendor artifacts.
 3. What status evidence can establish readiness and completion for this printer firmware?
 4. Which CUPS error policy best exposes partial-job uncertainty without automatic reprinting?
-5. Are additional media sizes required for release, beyond default A4 and a multi-page test?
+5. Which additional media sizes, including A4, should be added after the `w53h70` release baseline?
 6. What full-page throughput is acceptable once measured on the current adapter?
 7. Does the filter parser tolerate notification fragmentation/coalescing as delivered by the back channel?
 
