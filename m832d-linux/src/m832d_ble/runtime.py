@@ -1,5 +1,7 @@
 """Bounded job streaming and CUPS channel coordination."""
 import asyncio
+import os
+import stat
 
 from .channels import SideCommand, SideStatus
 from .model import CancelledError
@@ -23,7 +25,7 @@ class TransferTracker:
             self.acknowledged += count
             self.changed.notify_all()
 
-    async def wait_acknowledged(self, barrier, timeout=30.0):
+    async def wait_acknowledged(self, barrier, timeout=0.08):
         async def wait():
             async with self.changed:
                 await self.changed.wait_for(
@@ -61,24 +63,59 @@ class BackendRuntime:
         self.connected = True
         self.transmitting = False
         self._stopping = asyncio.Event()
+        self._channel_error = None
+        self._channel_failed = asyncio.Event()
+        self._side_idle = asyncio.Event()
 
-    async def notification(self, data):
+    def notification(self, data):
+        if self._stopping.is_set():
+            return
         try:
             self.notifications.put_nowait(data)
         except asyncio.QueueFull:
-            raise RuntimeError('Notification queue limit exceeded') from None
+            self._channel_error = RuntimeError('Notification queue limit exceeded')
+            self._channel_failed.set()
 
     async def run(self):
-        tasks = [
-            asyncio.create_task(self._produce()),
-            asyncio.create_task(self._consume()),
-            asyncio.create_task(self._notification_pump()),
-            asyncio.create_task(self._side_channel_pump()),
-        ]
+        producer = asyncio.create_task(self._produce())
+        consumer = asyncio.create_task(self._consume())
+        notifications = asyncio.create_task(self._notification_pump())
+        side_channel = asyncio.create_task(self._side_channel_pump())
+        channel_failure = asyncio.create_task(self._channel_failed.wait())
+        data_tasks = {producer, consumer}
+        channel_tasks = {notifications, side_channel, channel_failure}
         try:
-            await asyncio.gather(tasks[0], tasks[1])
+            while data_tasks:
+                done, _ = await asyncio.wait(
+                    data_tasks | channel_tasks, return_when=asyncio.FIRST_COMPLETED,
+                )
+                if channel_failure in done:
+                    raise self._channel_error or RuntimeError('CUPS channel failed')
+                for task in done & {notifications, side_channel}:
+                    await task
+                    raise RuntimeError('CUPS channel pump stopped unexpectedly')
+                for task in done & data_tasks:
+                    await task
+                    data_tasks.remove(task)
+
+            # Allow a final side-channel read cycle and forward every
+            # notification accepted before successful transport shutdown.
+            self._side_idle.clear()
+            await asyncio.wait_for(self._side_idle.wait(), 0.2)
+            if self._channel_failed.is_set():
+                raise self._channel_error or RuntimeError('CUPS channel failed')
+            for task in (notifications, side_channel):
+                if task.done():
+                    await task
+                    raise RuntimeError('CUPS channel pump stopped unexpectedly')
+            await asyncio.wait_for(self.notifications.join(), 2.0)
         finally:
             self._stopping.set()
+            try:
+                self.notifications.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+            tasks = data_tasks | channel_tasks
             for task in tasks:
                 if not task.done():
                     task.cancel()
@@ -87,7 +124,7 @@ class BackendRuntime:
     async def _produce(self):
         try:
             while not self.cancel_event.is_set():
-                data = await asyncio.to_thread(self.source.read, 4096)
+                data = await self._read_chunk()
                 if not data:
                     break
                 await self.tracker.add_produced(len(data))
@@ -95,8 +132,44 @@ class BackendRuntime:
             if self.cancel_event.is_set():
                 raise CancelledError('Job cancelled before all input was submitted')
         finally:
-            await self.queue.put(None)
             self.tracker.finished = True
+            if asyncio.current_task().cancelling():
+                try:
+                    self.queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+            else:
+                await self.queue.put(None)
+
+    async def _read_chunk(self):
+        try:
+            fd = self.source.fileno()
+            mode = os.fstat(fd).st_mode
+        except (AttributeError, OSError):
+            return await asyncio.to_thread(self.source.read, 4096)
+        if stat.S_ISREG(mode):
+            return await asyncio.to_thread(self.source.read, 4096)
+
+        loop = asyncio.get_running_loop()
+        ready = loop.create_future()
+        cancelled = asyncio.create_task(self.cancel_event.wait())
+
+        def mark_ready():
+            if not ready.done():
+                ready.set_result(None)
+
+        loop.add_reader(fd, mark_ready)
+        try:
+            done, _ = await asyncio.wait(
+                {ready, cancelled}, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancelled in done and cancelled.result():
+                raise CancelledError('Job cancelled while waiting for input')
+            return os.read(fd, 4096)
+        finally:
+            loop.remove_reader(fd)
+            cancelled.cancel()
+            await asyncio.gather(cancelled, return_exceptions=True)
 
     async def _consume(self):
         self.transmitting = True
@@ -119,20 +192,29 @@ class BackendRuntime:
     async def _notification_pump(self):
         while not self._stopping.is_set():
             data = await self.notifications.get()
-            await asyncio.to_thread(self.channels.write_back, data)
+            try:
+                if data is None:
+                    return
+                await asyncio.to_thread(self.channels.write_back, data)
+            finally:
+                self.notifications.task_done()
 
     async def _side_channel_pump(self):
         while not self._stopping.is_set():
             request = await asyncio.to_thread(self.channels.read_side, 0.05)
             if request is None:
+                self._side_idle.set()
                 await asyncio.sleep(0)
                 continue
+            self._side_idle.clear()
             if request.command == SideCommand.DRAIN_OUTPUT:
                 barrier = await self.tracker.capture_drain_barrier()
                 try:
                     await self.tracker.wait_acknowledged(barrier)
                     status, data = SideStatus.OK, b''
-                except (Exception, asyncio.CancelledError):
+                except TimeoutError:
+                    status, data = SideStatus.TIMEOUT, b''
+                except Exception:
                     status, data = SideStatus.IO_ERROR, b''
             elif request.command == SideCommand.GET_BIDI:
                 status, data = SideStatus.OK, b'\x01'

@@ -19,8 +19,7 @@ class DeviceConfig:
 
     @property
     def lock_key(self):
-        adapter = self.adapter or 'default'
-        return f'{adapter}-{self.address.replace(":", "").lower()}'
+        return self.address.replace(':', '').lower()
 
 
 def parse_device_uri(uri):

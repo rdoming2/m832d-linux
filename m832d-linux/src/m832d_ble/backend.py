@@ -3,6 +3,7 @@ import asyncio
 import os
 import signal
 import sys
+import time
 
 from .channels import CupsChannels
 from .config import format_device_uri, parse_device_uri
@@ -44,6 +45,7 @@ async def discover(timeout=5.0):
 
 
 async def run_job(invocation, config, channels=None, transport_factory=BleTransport):
+    started = time.monotonic()
     cancel_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):
@@ -54,20 +56,36 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
     channels = channels or CupsChannels()
     transport = None
     source = None
+    connecting = False
     try:
         source = open(invocation.filename, 'rb') if invocation.filename else sys.stdin.buffer
         with PrinterLock(config.lock_key):
             info(f'job {invocation.job_id}: connecting to configured LE printer')
             state(add='connecting-to-device')
+            connecting = True
             transport = transport_factory(config, lambda data: runtime.notification(data), cancel_event)
             runtime = BackendRuntime(transport, channels, source, cancel_event)
-            await transport.connect()
+            connect_task = asyncio.create_task(transport.connect())
+            cancel_task = asyncio.create_task(cancel_event.wait())
+            done, _ = await asyncio.wait(
+                {connect_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancel_task in done and cancel_task.result():
+                connect_task.cancel()
+                await asyncio.gather(connect_task, return_exceptions=True)
+                raise CancelledError('Job cancelled while connecting')
+            cancel_task.cancel()
+            await asyncio.gather(cancel_task, return_exceptions=True)
+            await connect_task
             state(remove='connecting-to-device')
+            connecting = False
             info(f'job {invocation.job_id}: BLE ready; transmitting vendor-filter output')
             await runtime.run()
             info(
-                f'job {invocation.job_id}: transport accepted '
-                f'{transport.acknowledged_bytes} bytes; physical completion is unconfirmed'
+                f'job {invocation.job_id}: submitted={transport.submitted_bytes} '
+                f'acknowledged={transport.acknowledged_bytes} '
+                f'elapsed={time.monotonic() - started:.3f}s; '
+                'physical completion is unconfirmed'
             )
             return BackendExit.OK
     except SetupRequiredError as exc:
@@ -75,14 +93,21 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
         state(add='authentication-required')
         return BackendExit.HOLD
     except CancelledError as exc:
-        error(f'job {invocation.job_id}: {exc}')
+        submitted = transport.submitted_bytes if transport is not None else 0
+        acknowledged = transport.acknowledged_bytes if transport is not None else 0
+        error(
+            f'job {invocation.job_id}: {exc}; submitted={submitted} '
+            f'acknowledged={acknowledged} elapsed={time.monotonic() - started:.3f}s'
+        )
         return BackendExit.CANCEL
     except Exception as exc:
         submitted = transport.submitted_bytes if transport is not None else 0
         if submitted:
+            acknowledged = transport.acknowledged_bytes
             error(
-                f'job {invocation.job_id}: transport failed after {submitted} bytes may '
-                f'have reached the printer; automatic replay is unsafe: {exc}'
+                f'job {invocation.job_id}: submitted={submitted} '
+                f'acknowledged={acknowledged} elapsed={time.monotonic() - started:.3f}s; '
+                f'data may have reached the printer and automatic replay is unsafe: {exc}'
             )
             state(add='uncertain-partial-print')
             return BackendExit.STOP
@@ -90,6 +115,8 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
         state(add='offline-report')
         return BackendExit.RETRY
     finally:
+        if connecting:
+            state(remove='connecting-to-device')
         if transport is not None:
             try:
                 await transport.close()

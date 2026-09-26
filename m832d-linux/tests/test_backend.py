@@ -1,7 +1,10 @@
 from pathlib import Path
+from io import BytesIO, StringIO
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from m832d_ble import backend
 from m832d_ble.backend import run_job
 from m832d_ble.config import DeviceConfig
 from m832d_ble.model import BackendExit, JobInvocation, SetupRequiredError
@@ -11,6 +14,7 @@ from .test_runtime import FakeChannels
 
 class RecordingTransport:
     failure = None
+    last_instance = None
 
     def __init__(self, config, callback, cancel_event):
         self.config = config
@@ -19,6 +23,8 @@ class RecordingTransport:
         self.submitted_bytes = 0
         self.acknowledged_bytes = 0
         self.closed = False
+        self.data = bytearray()
+        RecordingTransport.last_instance = self
 
     async def connect(self):
         if self.failure == 'connect':
@@ -30,6 +36,7 @@ class RecordingTransport:
         self.submitted_bytes += len(data)
         if self.failure == 'write':
             raise RuntimeError('injected uncertain write failure')
+        self.data.extend(data)
         self.acknowledged_bytes += len(data)
 
     async def close(self):
@@ -53,6 +60,18 @@ class BackendOutcomeTests(unittest.IsolatedAsyncioTestCase):
             self.invocation, self.config, FakeChannels(), RecordingTransport,
         )
         self.assertEqual(result, BackendExit.OK)
+        self.assertEqual(bytes(RecordingTransport.last_instance.data), b'binary\x00job')
+
+    async def test_stdin_job_is_streamed(self):
+        RecordingTransport.failure = None
+        invocation = JobInvocation('43', 'user', 'stdin', 1, '', None)
+        fake_stdin = type('FakeStdin', (), {'buffer': BytesIO(b'stdin\x00job')})()
+        with patch.object(backend.sys, 'stdin', fake_stdin):
+            result = await run_job(
+                invocation, self.config, FakeChannels(), RecordingTransport,
+            )
+        self.assertEqual(result, BackendExit.OK)
+        self.assertEqual(bytes(RecordingTransport.last_instance.data), b'stdin\x00job')
 
     async def test_failure_before_data_is_retryable(self):
         RecordingTransport.failure = 'connect'
@@ -74,6 +93,21 @@ class BackendOutcomeTests(unittest.IsolatedAsyncioTestCase):
             self.invocation, self.config, FakeChannels(), RecordingTransport,
         )
         self.assertEqual(result, BackendExit.STOP)
+
+
+class BackendMainTests(unittest.TestCase):
+    def test_discovery_record_uses_explicit_address(self):
+        async def fake_discover():
+            return [('D6:4D:F2:16:B6:BF', 'M832D')]
+
+        with patch.object(backend, 'discover', fake_discover), \
+                patch('sys.stdout', new_callable=StringIO) as output:
+            result = backend.main(['m832dble'])
+        self.assertEqual(result, BackendExit.OK)
+        self.assertIn('m832dble://D6-4D-F2-16-B6-BF/', output.getvalue())
+
+    def test_malformed_invocation_stops_queue(self):
+        self.assertEqual(backend.main(['m832dble', 'bad']), BackendExit.STOP)
 
 
 if __name__ == '__main__':

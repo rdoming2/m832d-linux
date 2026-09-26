@@ -32,9 +32,26 @@ class BleTransport:
         )
         if device is None:
             raise RuntimeError('Configured printer was not found during the bounded LE scan')
-        await explicit_le_connect(device, self.config.adapter)
+        try:
+            await explicit_le_connect(device, self.config.adapter)
+        except Exception as exc:
+            if _is_authentication_error(exc):
+                raise SetupRequiredError(
+                    'LE pairing is required before unattended printing'
+                ) from exc
+            raise
         self.client = BleakClient(device, timeout=self.config.connect_timeout)
-        await asyncio.wait_for(self.client.connect(), self.config.connect_timeout)
+        try:
+            await _wait_or_cancel(
+                self.client.connect(), self.cancel_event, self.config.connect_timeout,
+                'connection',
+            )
+        except Exception as exc:
+            if _is_authentication_error(exc):
+                raise SetupRequiredError(
+                    'LE pairing is required before unattended printing'
+                ) from exc
+            raise
         self.write_characteristic = self.client.services.get_characteristic(WRITE_UUID)
         self.notify_characteristic = self.client.services.get_characteristic(NOTIFY_UUID)
         if self.write_characteristic is None or self.notify_characteristic is None:
@@ -44,9 +61,12 @@ class BleTransport:
         if 'notify' not in self.notify_characteristic.properties:
             raise RuntimeError('FF03 does not support notifications')
         try:
-            await self.client.start_notify(self.notify_characteristic, self._notify)
+            await _wait_or_cancel(
+                self.client.start_notify(self.notify_characteristic, self._notify),
+                self.cancel_event, self.config.connect_timeout, 'notification setup',
+            )
         except Exception as exc:
-            if 'Authentication' in str(exc) or 'authentication' in str(exc):
+            if _is_authentication_error(exc):
                 raise SetupRequiredError('LE pairing is required before unattended printing') from exc
             raise
 
@@ -55,10 +75,12 @@ class BleTransport:
             return
         try:
             if self.notify_characteristic is not None and self.client.is_connected:
-                await self.client.stop_notify(self.notify_characteristic)
+                await asyncio.wait_for(
+                    self.client.stop_notify(self.notify_characteristic), 5.0,
+                )
         finally:
             if self.client.is_connected:
-                await self.client.disconnect()
+                await asyncio.wait_for(self.client.disconnect(), 5.0)
             self.client = None
 
     async def write(self, data):
@@ -70,9 +92,11 @@ class BleTransport:
             chunk = data[offset:offset + self.config.chunk_size]
             self.submitted_bytes += len(chunk)
             try:
-                await asyncio.wait_for(
-                    self.client.write_gatt_char(self.write_characteristic, chunk, response=True),
-                    self.config.write_timeout,
+                await _wait_or_cancel(
+                    self.client.write_gatt_char(
+                        self.write_characteristic, chunk, response=True,
+                    ),
+                    self.cancel_event, self.config.write_timeout, 'write',
                 )
             except Exception:
                 # submitted_bytes deliberately remains advanced: the peripheral may have received it.
@@ -80,9 +104,7 @@ class BleTransport:
             self.acknowledged_bytes += len(chunk)
 
     def _notify(self, sender, data):
-        result = self.notification_callback(bytes(data))
-        if asyncio.iscoroutine(result):
-            asyncio.create_task(result)
+        self.notification_callback(bytes(data))
 
 
 async def explicit_le_connect(device, configured_adapter=None):
@@ -124,15 +146,9 @@ async def explicit_le_connect(device, configured_adapter=None):
             if not any(marker in str(exc) for marker in ('UnknownMethod', 'NotSupported')):
                 raise
             try:
-                await call('org.freedesktop.DBus.Properties', 'Set', 'ssv', [
-                    'org.bluez.Device1', 'PreferredBearer', Variant('s', 'le'),
-                ])
-                reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
-                    'org.bluez.Device1', 'PreferredBearer',
-                ])
-                if reply.body[0].value != 'le':
-                    raise RuntimeError('PreferredBearer did not become le')
-                await call('org.bluez.Device1', 'Connect')
+                await connect_with_provisioned_le(call)
+            except SetupRequiredError:
+                raise
             except RuntimeError as fallback:
                 raise RuntimeError(
                     'BlueZ cannot select an LE bearer explicitly; ConnectDevice or '
@@ -140,3 +156,47 @@ async def explicit_le_connect(device, configured_adapter=None):
                 ) from fallback
     finally:
         bus.disconnect()
+
+
+async def connect_with_provisioned_le(call):
+    """Verify an administrator-provisioned LE preference without changing it."""
+    reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
+        'org.bluez.Device1', 'PreferredBearer',
+    ])
+    if reply.body[0].value != 'le':
+        raise SetupRequiredError(
+            'BlueZ PreferredBearer must be provisioned as le before printing'
+        )
+    await call('org.bluez.Device1', 'Connect')
+
+
+async def _wait_or_cancel(awaitable, cancel_event, timeout, operation):
+    operation_task = asyncio.create_task(awaitable)
+    cancellation_task = asyncio.create_task(cancel_event.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {operation_task, cancellation_task}, timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if cancellation_task in done and cancellation_task.result():
+            operation_task.cancel()
+            await asyncio.gather(operation_task, return_exceptions=True)
+            raise CancelledError(
+                f'Job cancelled during BLE {operation}; accepted data may still print'
+            )
+        if operation_task not in done:
+            operation_task.cancel()
+            await asyncio.gather(operation_task, return_exceptions=True)
+            raise TimeoutError(f'BLE {operation} timed out after {timeout:g}s')
+        return operation_task.result()
+    finally:
+        cancellation_task.cancel()
+        await asyncio.gather(cancellation_task, return_exceptions=True)
+
+
+def _is_authentication_error(exc):
+    text = str(exc).lower()
+    return any(marker in text for marker in (
+        'authentication', 'not authorized', 'notauthorized',
+        'insufficient authentication',
+    ))

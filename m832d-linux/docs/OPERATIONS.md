@@ -23,7 +23,9 @@ sudo ./scripts/install.sh
 
 `PREFIX`, `DESTDIR`, `PYTHON`, and `CUPS_SERVERBIN` can override detected
 installation paths. If CUPS does not list the manufacturer PPD, provide its
-existing path as `M832D_PPD=/path/to/M832D.ppd`. The installer does not restart
+existing path as `M832D_PPD=/path/to/M832D.ppd`. Package staging can provide the
+host filter path as `M832D_FILTER=/usr/lib/cups/filter/rastertoM08F`; `DESTDIR`
+applies only to files installed by this project. The installer does not restart
 CUPS, create queues, pair devices, or change D-Bus policy.
 
 ## Pair and diagnose
@@ -41,7 +43,9 @@ m832dble-diagnose 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0'
 
 The diagnostic performs a bounded LE scan and connection, resolves FF02/FF03,
 and subscribes to notifications. It does not send status queries or raster
-data. Failure under the CUPS identity, despite success as a desktop user,
+data. It does not set `PreferredBearer`; on BlueZ versions without
+`ConnectDevice`, an administrator must provision and verify
+`PreferredBearer=le` separately. Failure under the CUPS identity, despite success as a desktop user,
 indicates a bond, BlueZ API, or system-bus permission problem. Determine the
 minimum local permission change required before modifying policy; this package
 does not install a permissive D-Bus rule.
@@ -105,6 +109,7 @@ sudo lpadmin -x M832D-BLE
 - The manufacturer filter has fragile notification framing and competing
   back-channel readers.
 - Its raster-path drain timeout is approximately 100 ms and may be shorter than
-  a 4096-byte acknowledged BLE transfer.
+  a 4096-byte acknowledged BLE transfer. The backend returns a side-channel
+  timeout before that deadline rather than sending a stale success response.
 - Physical completion semantics for observed notifications are not established.
 - Classic PPD/filter workflows are deprecated in newer CUPS versions.

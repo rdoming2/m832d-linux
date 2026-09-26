@@ -13,6 +13,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.adapter, 'hci0')
         self.assertEqual(config.chunk_size, 182)
 
+    def test_equivalent_adapter_uris_share_printer_lock(self):
+        implicit = parse_device_uri('m832dble://D6-4D-F2-16-B6-BF/')
+        explicit = parse_device_uri('m832dble://D6-4D-F2-16-B6-BF/?adapter=hci0')
+        self.assertEqual(implicit.lock_key, explicit.lock_key)
+
     def test_uri_requires_explicit_identity(self):
         for uri in (
             'm832dble://M832D/',

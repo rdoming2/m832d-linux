@@ -1,5 +1,6 @@
 import asyncio
 from io import BytesIO
+import os
 import unittest
 
 from m832d_ble.channels import SideCommand, SideRequest, SideStatus
@@ -22,18 +23,24 @@ class FakeTransport:
 
 
 class FakeChannels:
-    def __init__(self, requests=()):
+    def __init__(self, requests=(), back_error=None, side_error=None):
         self.requests = list(requests)
         self.responses = []
         self.back = []
+        self.back_error = back_error
+        self.side_error = side_error
 
     def read_side(self, timeout):
+        if self.side_error:
+            raise self.side_error
         return self.requests.pop(0) if self.requests else None
 
     def write_side(self, command, status, data=b'', timeout=1.0):
         self.responses.append((command, status, data))
 
     def write_back(self, data, timeout=1.0):
+        if self.back_error:
+            raise self.back_error
         self.back.append(data)
 
 
@@ -93,6 +100,18 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await tracker.capture_drain_barrier(), 3)
         await producer
 
+    async def test_drain_returns_timeout_before_stale_response(self):
+        channels = FakeChannels([SideRequest(SideCommand.DRAIN_OUTPUT, b'')])
+        runtime = BackendRuntime(
+            FakeTransport(delay=0.2), channels, BytesIO(b'x' * 4096),
+            asyncio.Event(),
+        )
+        await runtime.run()
+        self.assertIn(
+            (SideCommand.DRAIN_OUTPUT, SideStatus.TIMEOUT, b''),
+            channels.responses,
+        )
+
     async def test_cancellation_stops_before_next_chunk(self):
         cancel = asyncio.Event()
 
@@ -106,6 +125,49 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             queue_chunks=1,
         )
         with self.assertRaises(CancelledError):
+            await runtime.run()
+
+    async def test_blocked_pipe_input_cancels_promptly(self):
+        read_fd, write_fd = os.pipe()
+        source = os.fdopen(read_fd, 'rb', buffering=0)
+        cancel = asyncio.Event()
+        runtime = BackendRuntime(
+            FakeTransport(), FakeChannels(), source, cancel, queue_chunks=1,
+        )
+        task = asyncio.create_task(runtime.run())
+        await asyncio.sleep(0.01)
+        cancel.set()
+        with self.assertRaises(CancelledError):
+            await asyncio.wait_for(task, 0.5)
+        source.close()
+        os.close(write_fd)
+
+    async def test_accepted_notifications_are_forwarded_in_order(self):
+        channels = FakeChannels()
+        runtime = BackendRuntime(
+            FakeTransport(), channels, BytesIO(b''), asyncio.Event(),
+        )
+        values = [bytes((0x1a, number, 0x00)) for number in range(20)]
+        for value in values:
+            runtime.notification(value)
+        await runtime.run()
+        self.assertEqual(channels.back, values)
+
+    async def test_back_channel_failure_fails_job(self):
+        channels = FakeChannels(back_error=BrokenPipeError('closed'))
+        runtime = BackendRuntime(
+            FakeTransport(), channels, BytesIO(b''), asyncio.Event(),
+        )
+        runtime.notification(b'\x1a\x0f\x0c')
+        with self.assertRaises(BrokenPipeError):
+            await runtime.run()
+
+    async def test_side_channel_failure_fails_job(self):
+        channels = FakeChannels(side_error=OSError('closed'))
+        runtime = BackendRuntime(
+            FakeTransport(), channels, BytesIO(b''), asyncio.Event(),
+        )
+        with self.assertRaises(OSError):
             await runtime.run()
 
 
