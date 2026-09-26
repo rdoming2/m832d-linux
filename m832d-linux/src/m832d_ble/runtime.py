@@ -33,6 +33,21 @@ class TransferTracker:
                     raise self.failed
         await asyncio.wait_for(wait(), timeout)
 
+    async def capture_drain_barrier(self, quiet_period=0.01):
+        """Include bytes flushed just before a request on the separate fd 4."""
+        observed = self.produced
+        while not self.finished and self.failed is None:
+            try:
+                async with self.changed:
+                    await asyncio.wait_for(
+                        self.changed.wait_for(lambda: self.produced != observed),
+                        quiet_period,
+                    )
+                    observed = self.produced
+            except TimeoutError:
+                break
+        return self.produced
+
 
 class BackendRuntime:
     def __init__(self, transport, channels, source, cancel_event, queue_chunks=16):
@@ -75,8 +90,8 @@ class BackendRuntime:
                 data = await asyncio.to_thread(self.source.read, 4096)
                 if not data:
                     break
-                await self.queue.put(data)
                 await self.tracker.add_produced(len(data))
+                await self.queue.put(data)
             if self.cancel_event.is_set():
                 raise CancelledError('Job cancelled before all input was submitted')
         finally:
@@ -113,9 +128,7 @@ class BackendRuntime:
                 await asyncio.sleep(0)
                 continue
             if request.command == SideCommand.DRAIN_OUTPUT:
-                # Let the producer consume the filter's preceding flushed write.
-                await asyncio.sleep(0)
-                barrier = self.tracker.produced
+                barrier = await self.tracker.capture_drain_barrier()
                 try:
                     await self.tracker.wait_acknowledged(barrier)
                     status, data = SideStatus.OK, b''

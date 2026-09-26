@@ -51,10 +51,11 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
             loop.add_signal_handler(signum, cancel_event.set)
         except NotImplementedError:
             pass
-    source = open(invocation.filename, 'rb') if invocation.filename else sys.stdin.buffer
     channels = channels or CupsChannels()
     transport = None
+    source = None
     try:
+        source = open(invocation.filename, 'rb') if invocation.filename else sys.stdin.buffer
         with PrinterLock(config.lock_key):
             info(f'job {invocation.job_id}: connecting to configured LE printer')
             state(add='connecting-to-device')
@@ -94,7 +95,7 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
                 await transport.close()
             except Exception as exc:
                 error(f'job {invocation.job_id}: cleanup failed: {exc}')
-        if invocation.filename:
+        if invocation.filename and source is not None:
             source.close()
 
 
