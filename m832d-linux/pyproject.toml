@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "m832d-ble-backend"
 version = "0.1.0"
 description = "CUPS BLE backend for the Phomemo M832D"
+license = {file = "LICENSE"}
+authors = [{name = "Richard"}]
 requires-python = ">=3.10"
 dependencies = [
     "bleak>=0.21",
@@ -15,6 +17,7 @@ dependencies = [
 [project.scripts]
 m832dble = "m832d_ble.backend:main"
 m832dble-diagnose = "m832d_ble.diagnose:main"
+rastertom832d = "m832d_filter.filter:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -46,8 +46,8 @@ The project owner approves scope, deployment, and release acceptance. One person
 
 - One M832D printer on the existing Linux/BlueZ host, with explicit printer identity and adapter selection where needed.
 - Initial media validation uses the PPD's `w53h70` choice (approximately 53 × 70 mm), matching the capture-tested workflow.
-- Reuse of the existing PPD and rastertoM08F filter.
-- Unmodified filter output carried over BLE, subject to successful compatibility testing.
+- Project-owned GPLv3 raster filter and generated M832D PPD.
+- Unmodified project-filter output carried over USB or BLE, subject to successful compatibility testing.
 - Notification delivery to the filter through the CUPS back channel.
 - Required CUPS backend lifecycle, side-channel responses, cancellation, queue behavior, logging, and installation/removal instructions.
 - Persistent pairing provisioned interactively before unattended printing.
@@ -55,7 +55,7 @@ The project owner approves scope, deployment, and release acceptance. One person
 
 ### Out of scope for the first release
 
-- Replacing the vendor raster filter or rewriting its image processing.
+- Redistributing the manufacturer PPD or raster filter.
 - General support for all Phomemo models or other operating systems.
 - Cloud printing, a mobile application, or a custom print dialog.
 - Automatic compression conversion of vendor output.
@@ -119,11 +119,11 @@ Successful CUPS delivery and confirmed physical print completion must be disting
 
 Proposed pipeline:
 
-Linux application → CUPS document conversion → rastertoM08F + M832D PPD → BLE backend → M832D
+Linux application → CUPS document conversion → rastertom832d + M832D PPD → USB or BLE backend → M832D
 
 Return path:
 
-M832D notifications → BLE backend → CUPS back channel → rastertoM08F
+M832D notifications → BLE backend → CUPS back channel
 
 The backend must also service CUPS side-channel requests while transmitting and receiving notifications. Its service execution identity may have different D-Bus/Bluetooth permissions from the interactive user; this must be tested rather than inferred from the working CLI.
 
@@ -135,9 +135,9 @@ The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queu
 
 | Phase | Deliverable | Exit gate |
 |---|---|---|
-| 1. Compatibility investigation | Map M832 filter commands, status parsing, drain behavior, cancellation, and back-channel assumptions; confirm execution dependencies. | Documented integration contract and a representative full-page test workload. |
-| 2. Backend implementation | Job input handling, explicit LE transport, acknowledged writes, back/side channels, serialization, bounded errors, diagnostics. | Offline protocol and fault tests pass; no printer required for these checks. |
-| 3. Hardware pilot | Separately configured M832D-BLE queue using the supplied driver. | One-page PDF and multiple-page jobs print correctly with expected settings. |
+| 1. Compatibility investigation | Map M832 commands, options, status parsing, cancellation, and USB/BLE assumptions. | Documented integration contract and representative full-page workload. |
+| 2. Filter/driver implementation | Project filter, `.drv`, generated PPD, deterministic raster tests, and standard USB staging. | Offline protocol/filter/PPD tests pass. |
+| 3. Hardware pilot | Separate standard-USB test queue, then separately configured M832D-BLE queue. | One-page and multiple-page jobs print correctly with expected settings. |
 | 4. Reliability validation | Power-cycle, contention, paper/cover faults, cancellation, interrupted transfer, service-context tests. | Acceptance matrix passes or unresolved limitations receive explicit scope approval. |
 | 5. Release | Versioned package, dependency list, operator guide, known limits, install/remove procedure. | Project owner approves release based on test evidence. |
 
@@ -172,13 +172,13 @@ Record software versions, printer firmware if obtainable, document identity, opt
 | Full-size uncompressed pages stress buffering or timing | Partial prints or long job times | Bounded streaming, acknowledged transport, realistic page tests, and measured performance. |
 | BlueZ experimental API or service permission differences | Works interactively but fails in CUPS | Explicit dependency/version checks and service-context testing. |
 | Unknown completion semantics | False success or duplicate retries | Separate delivery from physical completion; conservative retry policy and explicit release limitation if needed. |
-| Filter licensing/build dependencies | Distribution or installation blocked | Review applicable license and prefer using the user's installed filter until redistribution rights are established. |
+| Filter licensing/build dependencies | Distribution or installation blocked | GPLv3 project licensing, upstream attribution, and no manufacturer artifacts. |
 | Multiple clients, including phone app | Connection contention | Per-printer lock, clear busy reporting, and documented exclusive-use expectations. |
 
 ## 14. Open decisions
 
 1. The initial validation environment is CUPS 2.4.19, BlueZ 5.87, Python 3.14, and Bleak 3.0.2. The portable installer must check and report actual versions; broader compatibility remains to be established.
-2. Installation will require an independently installed manufacturer PPD and `rastertoM08F` filter. The BLE package will not redistribute or build the vendor artifacts.
+2. Installation builds the project-owned GPLv3 filter and PPD. The manufacturer queue and artifacts remain separate reference material.
 3. What status evidence can establish readiness and completion for this printer firmware?
 4. Which CUPS error policy best exposes partial-job uncertainty without automatic reprinting?
 5. Which additional media sizes, including A4, should be added after the `w53h70` release baseline?

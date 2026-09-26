@@ -1,6 +1,9 @@
 include AGENTS.md
 include M832D-BLE-Backend-BRD.md
 include README.md
+include LICENSE
+include NOTICE
+recursive-include cups *.drv
 recursive-include docs *.md
 recursive-include scripts *
 recursive-include tests *.py

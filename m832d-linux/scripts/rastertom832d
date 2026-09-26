@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from m832d_filter.filter import main
+
+raise SystemExit(main())

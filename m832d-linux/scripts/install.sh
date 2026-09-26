@@ -18,23 +18,8 @@ if ! command -v cups-config >/dev/null 2>&1; then
 fi
 
 CUPS_SERVERBIN=${CUPS_SERVERBIN:-$(cups-config --serverbin)}
-FILTER=${M832D_FILTER:-$CUPS_SERVERBIN/filter/rastertoM08F}
-if [ ! -x "$FILTER" ]; then
-    printf 'ERROR: manufacturer filter not found at %s\n' "$FILTER" >&2
-    printf '%s\n' 'Install the manufacturer M832D driver separately before this backend.' >&2
-    exit 1
-fi
-
-if [ -n "${M832D_PPD:-}" ]; then
-    if [ ! -r "$M832D_PPD" ]; then
-        printf 'ERROR: M832D_PPD is not readable: %s\n' "$M832D_PPD" >&2
-        exit 1
-    fi
-elif command -v lpinfo >/dev/null 2>&1 && lpinfo -m 2>/dev/null | grep -qi 'M832D'; then
-    :
-else
-    printf '%s\n' 'ERROR: no installed M832D PPD was reported by CUPS.' >&2
-    printf '%s\n' 'Set M832D_PPD to the separately installed PPD path if CUPS cannot list it.' >&2
+if ! command -v ppdc >/dev/null 2>&1; then
+    printf '%s\n' 'ERROR: ppdc is required to compile cups/drv/m832d.drv.' >&2
     exit 1
 fi
 
@@ -55,13 +40,27 @@ print(sysconfig.get_path('purelib'))
 PY
 )}
 PACKAGE_DIR="$DESTDIR$PURELIB/m832d_ble"
+FILTER_PACKAGE_DIR="$DESTDIR$PURELIB/m832d_filter"
+PROTOCOL_PACKAGE_DIR="$DESTDIR$PURELIB/m832d_protocol"
 BACKEND_DIR="$DESTDIR$CUPS_SERVERBIN/backend"
+FILTER_DIR="$DESTDIR$CUPS_SERVERBIN/filter"
 BIN_DIR="$DESTDIR$PREFIX/bin"
+MODEL_DIR=${CUPS_DATADIR:-$(cups-config --datadir)}/model
 
-install -d -m 0755 "$PACKAGE_DIR" "$BACKEND_DIR" "$BIN_DIR"
+install -d -m 0755 "$PACKAGE_DIR" "$FILTER_PACKAGE_DIR" "$PROTOCOL_PACKAGE_DIR" "$BACKEND_DIR" "$FILTER_DIR" "$BIN_DIR" "$DESTDIR$MODEL_DIR"
 for source in "$SOURCE_ROOT"/src/m832d_ble/*.py; do
     install -m 0644 "$source" "$PACKAGE_DIR/$(basename -- "$source")"
 done
+for package in m832d_filter m832d_protocol; do
+    for source in "$SOURCE_ROOT"/src/$package/*.py; do
+        install -m 0644 "$source" "$DESTDIR$PURELIB/$package/$(basename -- "$source")"
+    done
+done
+install -m 0755 "$SOURCE_ROOT/scripts/rastertom832d" "$FILTER_DIR/rastertom832d"
+PPD_BUILD=$(mktemp -d)
+trap 'rm -rf "$PPD_BUILD"' EXIT HUP INT TERM
+ppdc -d "$PPD_BUILD" "$SOURCE_ROOT/cups/drv/m832d.drv"
+install -m 0644 "$PPD_BUILD/Phomemo-M832D.ppd" "$DESTDIR$MODEL_DIR/Phomemo-M832D.ppd"
 {
     printf '%s\n' '#!/bin/sh'
     printf 'exec "%s" -m m832d_ble.backend "$@"\n' "$PYTHON_PATH"

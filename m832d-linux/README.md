@@ -2,10 +2,11 @@
 
 This script sends the image protocol decoded from your iPhone capture through Bleak/BlueZ. It also encodes PNG/JPEG and other Pillow-readable images into the same format. No kernel driver is needed.
 
-This repository now also contains the first offline-tested implementation of a
-`m832dble` CUPS backend. It requires the manufacturer PPD and `rastertoM08F`
-filter to be installed separately. Deployment and hardware validation remain
-explicit administrator actions; see `docs/OPERATIONS.md`.
+This repository now also contains a GPLv3 CUPS raster filter, generated M832D
+PPD source, and the `m832dble` backend. The filter is transport-neutral: the
+same output can be sent through a standard CUPS USB queue or the BLE backend.
+Deployment and hardware validation remain explicit administrator actions; see
+`docs/OPERATIONS.md` and `docs/USB-OPERATIONS.md`.
 
 The initial CUPS/BLE media target is the PPD's `w53h70` (approximately 53 × 70
 mm) choice, matching the workflow used to derive the standalone sender. The
@@ -73,7 +74,10 @@ python -m unittest discover -p test_encoder.py -v
 
 The acknowledged-write configuration has printed short and larger standalone jobs on the development printer. `01 01` and the other observed notifications still have provisional meanings and must not be treated as completion evidence.
 
-For CUPS, retain the working USB queue. The manufacturer filter emits uncompressed M832 raster data and depends on CUPS back-channel status replies and side-channel drain requests. The planned `m832dble` backend transports that output unchanged; it must not pass it through this script's mobile-job validator or prepend the captured setup sequence. See `M832D-BLE-Backend-BRD.md` for the release requirements.
+For CUPS, the project filter emits uncompressed M832 raster data. The BLE
+backend transports that output unchanged; it must not pass it through this
+script's mobile-job validator or prepend the captured setup sequence. The
+manufacturer queue remains the reference queue during migration.
 
 ## Backend development
 

@@ -1,8 +1,8 @@
 # M832D BLE backend operations
 
-This backend carries output from the separately installed manufacturer
-`M832D.ppd` and `rastertoM08F` filter. It does not include or replace those
-files. Keep the existing USB queue until BLE acceptance testing is complete.
+This project installs a GPLv3 `rastertom832d` filter and generated M832D PPD.
+The BLE backend carries that filter output unchanged. Keep the existing
+manufacturer USB queue until USB and BLE acceptance testing are complete.
 
 ## Supported baseline
 
@@ -13,9 +13,9 @@ select LE explicitly.
 
 ## Install
 
-Install the manufacturer driver first, without removing its USB queue. Install
-Bleak and dbus-fast for the system Python used by CUPS. From this source tree,
-review and then run:
+Install Bleak and dbus-fast for the system Python used by CUPS. The installer
+compiles and installs the project filter and PPD; it does not remove the
+manufacturer driver or USB queue. From this source tree, review and then run:
 
 ```sh
 sudo ./scripts/install.sh
@@ -24,11 +24,9 @@ sudo ./scripts/install.sh
 `PREFIX`, `DESTDIR`, `PYTHON`, `PYTHON_LIB`, and `CUPS_SERVERBIN` can override
 detected installation paths. The backend package is installed into the selected
 interpreter's default `purelib` directory; `PREFIX` controls the diagnostic
-command location. If CUPS does not list the manufacturer PPD, provide its
-existing path as `M832D_PPD=/path/to/M832D.ppd`. Package staging can provide the
-host filter path as `M832D_FILTER=/usr/lib/cups/filter/rastertoM08F`; `DESTDIR`
-applies only to files installed by this project. The installer does not restart
-CUPS, create queues, pair devices, or change D-Bus policy.
+command location. `DESTDIR` applies only to files installed by this project.
+The installer does not restart CUPS, create queues, pair devices, or change
+D-Bus policy.
 
 ## Pair and diagnose
 
@@ -119,15 +117,10 @@ sudo lpadmin -x M832D-BLE
 
 ## Known limitations
 
-- BLE replies to all manufacturer filter firmware/paper/cover/idle queries
-  still require controlled hardware validation.
-- The manufacturer filter has fragile notification framing and competing
-  back-channel readers.
-- Its raster-path drain timeout is approximately 100 ms and may be shorter than
-  a 4096-byte acknowledged BLE transfer. The backend returns a side-channel
-  timeout before that deadline rather than sending a stale success response.
-- The vendor filter deliberately emits uncompressed raster for M832. Backend
-  LZO conversion is not enabled; it requires protocol-aware drain accounting
-  and separate full-page validation.
+- The project filter emits uncompressed raster and currently uses only the
+  confirmed command family; vendor status semantics still require hardware
+  validation.
+- Printable width, media tracking, feed calibration, and physical completion
+  semantics require controlled hardware validation.
 - Physical completion semantics for observed notifications are not established.
 - Classic PPD/filter workflows are deprecated in newer CUPS versions.
