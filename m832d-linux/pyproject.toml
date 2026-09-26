@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "m832d-ble-backend"
+version = "0.1.0"
+description = "CUPS BLE backend for the Phomemo M832D"
+requires-python = ">=3.10"
+dependencies = [
+    "bleak>=0.21",
+    "dbus-fast>=2.21",
+]
+
+[project.scripts]
+m832dble = "m832d_ble.backend:main"
+m832dble-diagnose = "m832d_ble.diagnose:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
