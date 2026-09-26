@@ -19,7 +19,7 @@ python m832d.py replay test.bin --address D6:4D:F2:16:B6:BF
 python m832d.py replay best.bin --address D6:4D:F2:16:B6:BF
 ```
 
-Each command prints one job. Replay preserves the captured payload bytes but uses conservative 20 ms delays between writes. It subscribes to FF03 first, queries status, requires a matching query response, then sends the remaining bytes through FF02 without response. It listens for ten seconds after upload. A completed transfer is not proof that the paper printed successfully.
+Each command prints one job. Replay preserves the captured payload bytes and, by default, sends acknowledged writes in chunks of up to 182 bytes without an artificial delay. It subscribes to FF03 first, queries status, requires a matching query response, then sends the remaining bytes through FF02. It listens for 30 seconds after upload. A completed transfer is not proof that the paper printed successfully.
 
 Your earlier BlueZ troubleshooting established that this dual-mode printer needed `PreferredBearer: le`. Keep that existing configuration. If connection attempts again report `br-connection-not-supported`, check the printer's bearer in `bluetoothctl`; encoding changes will not fix a Classic-versus-LE connection problem.
 
@@ -45,8 +45,8 @@ Images wider than 576 pixels are shrunk proportionally. Smaller images are cente
 ## Transport and limits
 
 - Characteristics are resolved by UUID, not the differing Linux/iPhone numeric handles.
-- Chunk size is capped at 182 and at Bleak's `max_write_without_response_size`; 20-byte fallback is supported. See [Bleak's API](https://bleak.readthedocs.io/en/latest/api/client.html).
-- Default pacing: 20 ms between writes. `--delay-ms 40` slows transmission; `--chunk-size 20` requests smaller writes. Neither setting is a proven substitute for printer flow control on large jobs.
+- Chunk size is capped at 182. Command-mode writes are also capped at Bleak's `max_write_without_response_size`. See [Bleak's API](https://bleak.readthedocs.io/en/latest/api/client.html).
+- Default pacing is no artificial delay and the default mode is acknowledged `request` writes. `--delay-ms 40` slows transmission; `--chunk-size 20` requests smaller writes; `--write-mode command` selects unacknowledged writes for experiments. These are not substitutes for printer flow control.
 - `--wait 30` keeps the connection open longer after sending. Notification bytes are logged with elapsed times. No speculative completion or paper-error interpretation is imposed.
 - No retries occur after partial transmission, since retrying might print duplicates.
 - Vendor setup is copied from the successful capture. Raster bytes are LZO1X-compressed in 4096-byte blocks, each preceded by a 3-byte little-endian compressed length. Footer is two `ESC d 2` commands.
@@ -61,6 +61,6 @@ Run checks with:
 python -m unittest discover -p test_encoder.py -v
 ```
 
-Physical printing has not been tested by this script yet. Start with the captured jobs, then a newly encoded short image. After those work, test larger images and determine whether `01 01` implements credits or acknowledgments before relying on long pages.
+The acknowledged-write configuration has printed short and larger standalone jobs on the development printer. `01 01` and the other observed notifications still have provisional meanings and must not be treated as completion evidence.
 
-For CUPS, retain your working USB queue initially. A BLE backend can eventually send this same byte stream, but first inspect what your existing CUPS filter produces: USB output may use a different raster/compression mode. If identical, a transport-only backend is enough; otherwise add an image/raster conversion filter. A reliable backend also needs job serialization, paper/error handling, confirmed completion, and duplicate-safe retry behavior. This bundle is the first standalone sender, not an installed CUPS driver.
+For CUPS, retain the working USB queue. The manufacturer filter emits uncompressed M832 raster data and depends on CUPS back-channel status replies and side-channel drain requests. The planned `m832dble` backend transports that output unchanged; it must not pass it through this script's mobile-job validator or prepend the captured setup sequence. See `M832D-BLE-Backend-BRD.md` for the release requirements.

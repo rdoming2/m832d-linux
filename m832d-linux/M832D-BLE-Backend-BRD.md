@@ -1,0 +1,203 @@
+# Business Requirements Document: Phomemo M832D BLE Backend for Linux
+
+Version: 1.0 — Draft for review  
+Date: 2026-09-26  
+Target environment: Linux, BlueZ, CUPS, Phomemo M832D
+
+## 1. Purpose and business outcome
+
+Enable users to print ordinary documents wirelessly to the Phomemo M832D from Linux applications through CUPS. Reuse the existing model-specific PPD and raster filter so users retain the established document rendering, media selection, and print settings of their USB workflow.
+
+The deliverable is a separately installable BLE backend and a dedicated M832D-BLE queue. The existing USB queue must remain usable. Production readiness requires more than successful byte transmission: jobs must have understandable outcomes, controlled recovery, and predictable behavior across reconnects and printer faults.
+
+## 2. Problem statement
+
+The M832D mobile application uses BLE GATT rather than a usable serial printing interface in the tested workflow. Initial Linux connections selected Classic Bluetooth and failed. Explicit LE connection establishment and interactive LE pairing resolved connection and notification access. Large-image printing initially stopped partway through with unacknowledged 20-byte writes. A configuration using acknowledged writes, chunks up to 182 bytes, and no additional delay printed successfully.
+
+A standalone Python sender now prints compressed and uncompressed monochrome images. It is not a CUPS backend: its job validator expects a particular image-job envelope, and its fixed observation period does not prove physical completion. The vendor filter also exchanges status and output-drain requests with its backend. Simply forwarding a file would leave those interactions unimplemented.
+
+## 3. Evidence and confidence
+
+| Finding | Evidence | Confidence / limit |
+|---|---|---|
+| Explicit LE establishment solves the observed Classic connection failure | User-tested connection through BlueZ ConnectDevice | Verified on the current setup; reconnect and version coverage remain limited |
+| Notification subscription requires authentication on the tested printer | HCI capture shows descriptor write rejected with Insufficient Authentication, followed by pairing confirmation timeout | Verified; visible pairing agent subsequently resolved the failure |
+| Acknowledged writes with chunks up to 182 bytes and no added delay print small and larger images | User-confirmed physical prints | Verified configuration; acknowledgment and chunk size changed together, so the independent cause of the earlier failure is not established |
+| Uncompressed raster jobs print over BLE | User-confirmed test | Verified for standalone sender jobs, not the complete CUPS filter sequence |
+| Captured compressed jobs decode to Test and Best | LZO decoding and rendered images | Verified; 576 × 164 images, three compressed blocks per job |
+| The supplied PPD identifies model 77832, 300 dpi, default A4, and rastertoM08F | PPD inspection | Verified for supplied PPD |
+| The filter's M832 branch uses uncompressed raster output | Source inspection: compression-off command and GS v 0 raster header | Verified in supplied source; execution of the complete BLE pipeline is pending |
+| Filter depends on bidirectional backend interaction | Source uses CUPS back-channel reads and side-channel drain requests | Verified; exact operational expectations must be mapped during implementation |
+| Notification meanings and print completion are fully understood | Not established | Open: observed sequences must not be treated as authoritative completion/error states without validation |
+
+Reference inputs: supplied M832D.ppd; rastertoM08F.cxx from QY_Printer-2.1.0.3; iPhone print capture; Linux failure capture; standalone m832d.py; user-confirmed print results. These are engineering evidence, not approval to install or change system services.
+
+## 4. Stakeholders and users
+
+- Primary user: Linux desktop user printing documents and images from applications or scripts.
+- Administrator: installs the backend, provisions pairing, creates the queue, and diagnoses service permissions.
+- Maintainer: supports the backend, documents protocol behavior, and manages compatibility with BlueZ, CUPS, and Python dependencies.
+
+The project owner approves scope, deployment, and release acceptance. One person may fulfill all roles.
+
+## 5. Scope
+
+### In scope for the first release
+
+- One M832D printer on the existing Linux/BlueZ host, with explicit printer identity and adapter selection where needed.
+- Reuse of the existing PPD and rastertoM08F filter.
+- Unmodified filter output carried over BLE, subject to successful compatibility testing.
+- Notification delivery to the filter through the CUPS back channel.
+- Required CUPS backend lifecycle, side-channel responses, cancellation, queue behavior, logging, and installation/removal instructions.
+- Persistent pairing provisioned interactively before unattended printing.
+- A separately named BLE queue, with controlled end-to-end validation.
+
+### Out of scope for the first release
+
+- Replacing the vendor raster filter or rewriting its image processing.
+- General support for all Phomemo models or other operating systems.
+- Cloud printing, a mobile application, or a custom print dialog.
+- Automatic compression conversion of vendor output.
+- Guaranteed exactly-once physical printing across loss of connection or power.
+- Automatic printer firmware updates, system-wide Bluetooth mode changes, or removal of the USB queue.
+- Broad CUPS-version support beyond the documented, tested host configuration.
+
+## 6. Required user journeys
+
+1. **Initial setup:** administrator installs dependencies, pairs the selected printer with visible confirmation, verifies BLE access, and creates a separate queue.
+2. **Normal printing:** user selects M832D-BLE, chooses the existing driver options, and prints without opening a terminal or confirming pairing again.
+3. **Printer unavailable:** job remains recoverable with a clear queue status; the user can power on the printer and retry without recreating the queue.
+4. **Printer fault:** paper-out, cover-open, or another supported condition is reported intelligibly and handled consistently with the vendor filter.
+5. **Interrupted job:** the system distinguishes failure before sending data from an uncertain partial print. It does not silently restart a potentially printed job.
+6. **Cancellation and removal:** user cancels a job or administrator removes the BLE integration without disabling the USB workflow.
+
+## 7. Functional requirements
+
+Priority: Must = release requirement; Should = desirable after required behavior is reliable.
+
+| ID | Priority | Requirement | Acceptance evidence |
+|---|---|---|---|
+| FR-01 | Must | Accept the CUPS backend invocation and job input forms required by the selected CUPS version, including file and standard-input jobs. | Integration tests exercise both input forms and required discovery/invocation behavior. |
+| FR-02 | Must | Identify the configured printer explicitly and resolve FF02 and FF03 by UUID. Numeric characteristic handles must not be hardcoded. | Logs and tests show the intended device, UUID resolution, and clear rejection when required capabilities are absent. |
+| FR-03 | Must | Establish an LE connection explicitly; no silent fallback to Classic Bluetooth. | Cold-start and reconnect tests establish LE successfully or produce an actionable error. |
+| FR-04 | Must | Support an administrator-provisioned bond for unattended jobs. Missing or invalid pairing must produce a clear setup-required outcome. | Jobs run without a desktop pairing prompt after setup; an unpaired test fails in a bounded, understandable way. |
+| FR-05 | Must | Forward vendor filter output in order without unintended insertion, removal, or modification of bytes. | A recording transport verifies byte-for-byte equivalence, including multiple pages and binary payloads. |
+| FR-06 | Must | Use the validated acknowledged-write configuration as the initial transport policy, with chunks up to 182 bytes subject to actual connection/API constraints. | Tests verify response-enabled writes, ordering, limits, and failure reporting. |
+| FR-07 | Must | Deliver printer notifications to the CUPS back channel in order, using the representation expected by the filter. | Filter queries receive their replies; split/coalesced delivery is tested against the filter parser. |
+| FR-08 | Must | Implement the CUPS side-channel operations required by the filter, including output drain. Define drain as host-side pending output accepted through the transport, distinct from physical printing. | Drain completes only after prior buffered writes are acknowledged; faults return appropriate responses without indefinite waits. |
+| FR-09 | Must | Serialize access per printer so concurrent jobs or queues cannot interleave print streams. | Two simultaneous job attempts result in serialized delivery or an explicit busy outcome. |
+| FR-10 | Must | Maintain bounded memory and bounded waits while handling large pages and status traffic. | Full-page and fault tests show controlled buffering and no deadlock. |
+| FR-11 | Must | Handle cancellation promptly and stop submitting additional print data; report that already accepted data may still print. | Mid-job cancellation test confirms transmission stops and records partial-job uncertainty. |
+| FR-12 | Must | Distinguish no-data-sent failures from failures after data may have reached the printer. Apply retry policy accordingly. | Injected failures before, during, and after upload produce the specified queue behavior. |
+| FR-13 | Must | Report job outcome consistently with CUPS semantics and supported printer evidence. A fixed delay or ATT acknowledgment alone must not be presented as confirmed physical completion. | Completion policy is documented and validated against the filter and observed printer behavior. |
+| FR-14 | Must | Provide installation, pairing, queue creation, diagnostics, upgrade, and removal instructions. Preserve the USB queue. | Setup and rollback are demonstrated on the target host. |
+| FR-15 | Should | Provide a diagnostic command that checks device availability, bond/access, services, and transport configuration without printing. | Command distinguishes common setup faults and does not send a raster job. |
+
+## 8. Status, completion, and recovery policy
+
+Implementation must explicitly track at least: waiting for printer, connecting, authentication required, ready, transmitting, awaiting printer/filter outcome, failed before transmission, uncertain partial print, and cancelled. Mapping these states to supported CUPS status and exit behavior is an implementation task.
+
+Notifications such as `01 01`, `02 b6 00`, `1a 0f 0c`, `1a 3e 00 00`, and `1a 3b 04 19 00 01 00` were observed. Their meanings must be established from source and controlled tests before using them as authoritative state signals. The vendor filter's existing interpretation should be reused where applicable, rather than inventing a competing parser.
+
+Retries may be automatic only when the backend can establish that no print data was submitted. After partial transmission, loss of connectivity, or uncertain completion, the default must require an explicit retry decision through the documented queue workflow. CUPS queue error policy must be configured to preserve this behavior; backend logic alone is insufficient.
+
+Successful CUPS delivery and confirmed physical print completion must be distinguished in documentation. If the available protocol cannot reliably establish physical completion, this limitation must be explicit and accepted before release. No additional fixed 30-second sleep should be treated as a completion protocol simply because it worked in the standalone test.
+
+## 9. Nonfunctional requirements
+
+- **Reliability:** no interleaving, silent byte loss, unlimited retry loops, or indefinite side-channel waits.
+- **Performance:** baseline the tested full-page workload and record rendering, connection, upload, and completion-observation times separately. Numeric service targets will be agreed after this baseline; current small-image timings do not establish full-page performance.
+- **Security:** restrict connections to the configured device; preserve explicit pairing approval; do not log keys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
+- **Maintainability:** separate CUPS adaptation, BLE transport, and status policy; document version assumptions and protocol evidence. Runtime changes must have a clear rollback path.
+- **Observability:** log job identifier, stage, bytes submitted/acknowledged, transport configuration, elapsed time, and actionable errors. Detailed notification logging is opt-in or appropriately bounded.
+- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Identify required experimental BlueZ APIs and provide clear errors when absent.
+- **Resource management:** close connections and descriptors, release locks, and handle broken pipes and process termination without leaving the printer permanently unavailable.
+
+## 10. Integration constraints and design boundaries
+
+Proposed pipeline:
+
+Linux application → CUPS document conversion → rastertoM08F + M832D PPD → BLE backend → M832D
+
+Return path:
+
+M832D notifications → BLE backend → CUPS back channel → rastertoM08F
+
+The backend must also service CUPS side-channel requests while transmitting and receiving notifications. Its service execution identity may have different D-Bus/Bluetooth permissions from the interactive user; this must be tested rather than inferred from the working CLI.
+
+Initial transport settings are acknowledged writes, no artificial inter-write delay, and a maximum requested chunk size of 182 bytes. These settings are a tested starting point, not universal printer limits. The vendor output must not pass through the standalone sender's fixed SETUP/FOOTER validator or have the mobile-app setup prepended automatically.
+
+The PPD specifies 300 dpi and default A4. The standalone encoder's 576-pixel canvas must not limit CUPS output. Full-size pages will be substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior should remain owned by the existing CUPS/filter pipeline.
+
+## 11. Delivery phases and gates
+
+| Phase | Deliverable | Exit gate |
+|---|---|---|
+| 1. Compatibility investigation | Map M832 filter commands, status parsing, drain behavior, cancellation, and back-channel assumptions; confirm execution dependencies. | Documented integration contract and a representative full-page test workload. |
+| 2. Backend implementation | Job input handling, explicit LE transport, acknowledged writes, back/side channels, serialization, bounded errors, diagnostics. | Offline protocol and fault tests pass; no printer required for these checks. |
+| 3. Hardware pilot | Separately configured M832D-BLE queue using the supplied driver. | One-page PDF and multiple-page jobs print correctly with expected settings. |
+| 4. Reliability validation | Power-cycle, contention, paper/cover faults, cancellation, interrupted transfer, service-context tests. | Acceptance matrix passes or unresolved limitations receive explicit scope approval. |
+| 5. Release | Versioned package, dependency list, operator guide, known limits, install/remove procedure. | Project owner approves release based on test evidence. |
+
+Queue creation, privileged installation, and changes to service configuration are deployment actions to be performed under the user's deployment authorization after the package is reviewable.
+
+## 12. Acceptance matrix
+
+| Test | Required result |
+|---|---|
+| One-page text PDF at driver defaults | Complete, readable page; media size and positioning agree with the USB reference. |
+| Full-page image/graphics document | Complete output without the earlier short partial-print behavior; no unexplained data loss. |
+| Three-page document | Correct order and count, correct page/feed behavior, no merged or missing pages. |
+| Five consecutive jobs | All print once without manual reconnection or repeated pairing prompts. |
+| Printer power cycle between jobs | Existing bond works, explicit LE reconnect succeeds, and the next job prints. |
+| Printer off at submission | Bounded connection handling and clear recoverable queue state; no busy loop. |
+| Paper out / cover open | Supported state is reported and recovery does not silently duplicate a partial page. |
+| Bluetooth loss during upload | Job is reported as failed/uncertain; no automatic whole-job replay after partial submission. |
+| Cancellation during upload | Backend ceases new submissions and releases resources; already transmitted data is acknowledged as potentially printable. |
+| Concurrent jobs | No interleaved printer data; documented serialization or busy handling. |
+| CUPS service execution | Backend accesses the bonded printer without a logged-in terminal agent for routine jobs. |
+| Side/back-channel behavior | Vendor filter completes required queries and drain requests without deadlock or fabricated status. |
+| Remove BLE integration | USB queue and unrelated Bluetooth devices remain operational. |
+
+Record software versions, printer firmware if obtainable, document identity, options, physical results, logs, and any retries for hardware tests. A queued job marked successful without inspection is not sufficient evidence for physical-output acceptance.
+
+## 13. Risks and mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| Vendor filter assumes USB-specific timing or status behavior | Hangs or incorrect state over BLE | Map requests, capture actual exchanges, and validate side/back channels before unattended use. |
+| BLE notification format differs from USB replies | Filter misinterprets state | Compare payloads and parser expectations; add a documented translation only if evidence requires it. |
+| Full-size uncompressed pages stress buffering or timing | Partial prints or long job times | Bounded streaming, acknowledged transport, realistic page tests, and measured performance. |
+| BlueZ experimental API or service permission differences | Works interactively but fails in CUPS | Explicit dependency/version checks and service-context testing. |
+| Unknown completion semantics | False success or duplicate retries | Separate delivery from physical completion; conservative retry policy and explicit release limitation if needed. |
+| Filter licensing/build dependencies | Distribution or installation blocked | Review applicable license and prefer using the user's installed filter until redistribution rights are established. |
+| Multiple clients, including phone app | Connection contention | Per-printer lock, clear busy reporting, and documented exclusive-use expectations. |
+
+## 14. Open decisions
+
+1. The initial validation environment is CUPS 2.4.19, BlueZ 5.87, Python 3.14, and Bleak 3.0.2. The portable installer must check and report actual versions; broader compatibility remains to be established.
+2. Installation will require an independently installed manufacturer PPD and `rastertoM08F` filter. The BLE package will not redistribute or build the vendor artifacts.
+3. What status evidence can establish readiness and completion for this printer firmware?
+4. Which CUPS error policy best exposes partial-job uncertainty without automatic reprinting?
+5. Are additional media sizes required for release, beyond default A4 and a multi-page test?
+6. What full-page throughput is acceptable once measured on the current adapter?
+7. Does the filter parser tolerate notification fragmentation/coalescing as delivered by the back channel?
+
+These questions do not block offline implementation. They must be resolved or recorded as accepted limits at the relevant delivery gate.
+
+### 14.1 Verified filter/backend contract
+
+Source inspection established these requirements for the M832 branch:
+
+- The filter writes firmware (`1f 11 07`), idle (`1f 11 43`), cover (`1f 11 12`), and paper (`1f 11 11`) queries and expects binary replies through CUPS back-channel fd 3.
+- The backend must forward each FF03 value as raw bytes, without ATT framing, hexadecimal encoding, or delimiters.
+- The filter uses CUPS side-channel fd 4 and requests output drains after status queries, setup, raster headers, and raster blocks. Raster-path drain requests use an approximately 100 ms timeout.
+- A successful drain means all filter bytes preceding the request have completed acknowledged transport writes. It is not evidence that the printer has physically completed a page.
+- The filter's status parser assumes complete records and has competing monitor and synchronous readers. Fragmented/coalesced notification behavior and the possible reader race require harness and hardware validation.
+- The M832 output is an uncompressed `GS v 0` raster stream. The BLE backend must not LZO-compress, validate as a mobile-image envelope, or otherwise modify it.
+
+The first implementation will be a Python backend using Bleak and `dbus-fast`, with typed libcups bindings for back- and side-channel operations and a portable installer that detects CUPS paths.
+
+## 15. Release definition
+
+The project is complete when the user can print representative documents through a dedicated CUPS BLE queue using the existing model driver, the acceptance matrix has recorded results, fault and retry behavior is documented and tested, and installation/removal preserves the USB workflow. The release includes source, installation materials, tests, compatibility notes, and known limitations.
