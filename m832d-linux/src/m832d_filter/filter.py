@@ -1,6 +1,9 @@
 """CUPS raster to M832D raw command conversion."""
 
+import os
+import select
 import sys
+import time
 
 from m832d_protocol import FOOTER, build_setup, feed, raster_block
 
@@ -88,6 +91,24 @@ def convert(stream, options: Options):
     return bytes(output)
 
 
+def _ble_ready(output, stream, timeout=3.0):
+    """Emit the confirmed BLE readiness query and await its notification."""
+    stream.write(output[:3])
+    stream.flush()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = max(0.0, deadline - time.monotonic())
+        ready, _, _ = select.select([3], [], [], remaining)
+        if not ready:
+            break
+        data = os.read(3, 4096)
+        if not data:
+            break
+        if b"\x1a\x04" in data:
+            return
+    raise RuntimeError("M832D BLE readiness query received no 1a 04 reply")
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     source = sys.stdin.buffer
@@ -95,7 +116,12 @@ def main(argv=None):
         source = open(argv[-1], "rb")
     try:
         options = parse_options(argv[5] if len(argv) > 5 else "")
-        sys.stdout.buffer.write(convert(source, options))
+        output = convert(source, options)
+        if os.environ.get("DEVICE_URI", "").startswith("m832dble://"):
+            _ble_ready(output, sys.stdout.buffer)
+            sys.stdout.buffer.write(output[3:])
+        else:
+            sys.stdout.buffer.write(output)
     except (OSError, ValueError) as exc:
         print(f"rastertom832d: {exc}", file=sys.stderr)
         return 1

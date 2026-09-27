@@ -35,21 +35,23 @@ def _text(value):
 
 def read_pages(stream, max_page_bytes=128 * 1024 * 1024):
     data = stream.read()
-    if len(data) < 4 or data[:4] not in (b"RaS3", b"3SaR"):
-        raise ValueError("input is not CUPS Raster 3")
-    little = data[:4] == b"RaS3"
-    if not little:
-        raise ValueError("big-endian CUPS raster is not supported")
+    if len(data) < 4 or data[:4] not in (b"RaS1", b"RaS2", b"RaS3", b"RaS4",
+                                          b"1SaR", b"2SaR", b"3SaR", b"4SaR"):
+        raise ValueError("input is not CUPS Raster")
+    # CUPS writes the magic as a byte-order marker, but the page header uses
+    # the host-native layout.  The supported deployment is Linux little-endian;
+    # both RaS* and *SaR streams therefore have little-endian page fields.
+    page_format = _FORMAT
     position = 4
     pages = []
     while position < len(data):
         if len(data) - position < 1796:
             raise ValueError("truncated CUPS raster header")
-        values = struct.unpack_from(_FORMAT, data, position)
+        values = struct.unpack_from(page_format, data, position)
         position += 1796
-        width, height = values[32], values[33]
-        bits_color, bits_pixel, bytes_line = values[35:38]
-        color_space, num_colors = values[39], values[44]
+        width, height = values[33], values[34]
+        bits_color, bits_pixel, bytes_line = values[36:39]
+        color_space, num_colors = values[40], values[45]
         if not 1 <= width <= 65535 or not 1 <= height <= 65535:
             raise ValueError("invalid raster dimensions")
         if not 1 <= bytes_line <= 16 * 1024 * 1024:
