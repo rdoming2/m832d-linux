@@ -23,11 +23,13 @@ ColorModel Gray/Grayscale w chunky 0
 *MediaSize "w53h70"
 MediaSize "w80h106"
 MediaSize "w110h146"
+
+HWMargins 5mm 10.58mm 5mm 10.58mm
 MediaSize "Letter"
 MediaSize "A4"
 VariablePaperSize Yes
-MinSize 53mm 70mm
-MaxSize 613mm 5700mm
+MinSize 0mm 0mm
+MaxSize 216.25mm 2010.83mm
 
 {
   Attribute "NickName" "" "Phomemo M832D"
