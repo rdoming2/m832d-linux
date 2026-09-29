@@ -107,6 +107,165 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             await explicit_le_connect(device, 'hci0', allow_pairing=True)
         self.assertLess(events.index('PairBeforeConnect'), events.index('ConnectDevice'))
 
+    async def test_fresh_pairing_reuses_connected_le_bearer(self):
+        events = []
+        device = SimpleNamespace(
+            address='D6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
+                'props': {'AddressType': 'random', 'Paired': False},
+            },
+        )
+
+        class FakeBus:
+            async def connect(self):
+                return self
+
+            async def call(self, message):
+                events.append(message.member)
+                if message.member == 'Get':
+                    return SimpleNamespace(
+                        message_type=MessageType.METHOD_RETURN,
+                        body=[SimpleNamespace(value=True)],
+                    )
+                return SimpleNamespace(
+                    message_type=MessageType.METHOD_RETURN, body=[],
+                )
+
+            def disconnect(self):
+                pass
+
+        async def fake_pair(*args, **kwargs):
+            events.append('Pair')
+            return True
+
+        with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
+                patch('m832d_ble.transport.ensure_paired', new=fake_pair):
+            await explicit_le_connect(device, 'hci0', allow_pairing=True)
+        self.assertEqual(events, ['Pair', 'Get'])
+
+    async def test_fresh_pairing_reconnects_the_sole_new_bond(self):
+        events = []
+        device = SimpleNamespace(
+            address='D6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
+                'props': {'AddressType': 'random', 'Paired': False},
+            },
+        )
+
+        class FakeBus:
+            async def connect(self):
+                return self
+
+            async def call(self, message):
+                events.append(message.member)
+                if message.member == 'Get':
+                    return SimpleNamespace(
+                        message_type=MessageType.METHOD_RETURN,
+                        body=[SimpleNamespace(value=False)],
+                    )
+                return SimpleNamespace(
+                    message_type=MessageType.METHOD_RETURN, body=[],
+                )
+
+            def disconnect(self):
+                pass
+
+        async def fake_pair(*args, **kwargs):
+            events.append('Pair')
+            return True
+
+        with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
+                patch('m832d_ble.transport.ensure_paired', new=fake_pair):
+            await explicit_le_connect(device, 'hci0', allow_pairing=True)
+        self.assertEqual(events, ['Pair', 'Get', 'Connect'])
+        self.assertNotIn('ConnectDevice', events)
+
+    async def test_random_address_reconnects_without_experimental_apis(self):
+        events = []
+        device = SimpleNamespace(
+            address='D6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
+                'props': {'AddressType': 'random', 'Paired': True},
+            },
+        )
+
+        class FakeBus:
+            async def connect(self):
+                return self
+
+            async def call(self, message):
+                events.append(message.member)
+                if message.member == 'ConnectDevice':
+                    return SimpleNamespace(
+                        message_type=MessageType.ERROR,
+                        error_name='org.freedesktop.DBus.Error.UnknownMethod',
+                        body=['ConnectDevice is unavailable'],
+                    )
+                if message.member == 'Get':
+                    return SimpleNamespace(
+                        message_type=MessageType.ERROR,
+                        error_name='org.freedesktop.DBus.Error.UnknownProperty',
+                        body=['PreferredBearer is unavailable'],
+                    )
+                return SimpleNamespace(
+                    message_type=MessageType.METHOD_RETURN, body=[],
+                )
+
+            def disconnect(self):
+                pass
+
+        async def already_paired(*args, **kwargs):
+            return False
+
+        with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
+                patch('m832d_ble.transport.ensure_paired', new=already_paired):
+            await explicit_le_connect(device, 'hci0', allow_pairing=True)
+        self.assertEqual(events, ['ConnectDevice', 'Get', 'Connect'])
+
+    async def test_public_address_still_requires_explicit_bearer_api(self):
+        device = SimpleNamespace(
+            address='A6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_A6_4D_F2_16_B6_BF',
+                'props': {'AddressType': 'public', 'Paired': True},
+            },
+        )
+
+        class FakeBus:
+            async def connect(self):
+                return self
+
+            async def call(self, message):
+                if message.member == 'ConnectDevice':
+                    return SimpleNamespace(
+                        message_type=MessageType.ERROR,
+                        error_name='org.freedesktop.DBus.Error.UnknownMethod',
+                        body=['ConnectDevice is unavailable'],
+                    )
+                if message.member == 'Get':
+                    return SimpleNamespace(
+                        message_type=MessageType.ERROR,
+                        error_name='org.freedesktop.DBus.Error.UnknownProperty',
+                        body=['PreferredBearer is unavailable'],
+                    )
+                return SimpleNamespace(
+                    message_type=MessageType.METHOD_RETURN, body=[],
+                )
+
+            def disconnect(self):
+                pass
+
+        async def already_paired(*args, **kwargs):
+            return False
+
+        with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
+                patch('m832d_ble.transport.ensure_paired', new=already_paired):
+            with self.assertRaisesRegex(RuntimeError, 'public-address device'):
+                await explicit_le_connect(device, 'hci0', allow_pairing=True)
+
 
 if __name__ == '__main__':
     unittest.main()

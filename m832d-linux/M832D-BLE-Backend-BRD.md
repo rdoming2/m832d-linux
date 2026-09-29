@@ -1,6 +1,6 @@
 # Business Requirements Document: Phomemo M832D BLE Backend for Linux
 
-Version: 1.1 — Draft for review
+Version: 1.2 — Draft for review
 Date: 2026-09-29
 Target environment: Linux, BlueZ, CUPS, Phomemo M832D
 
@@ -81,7 +81,7 @@ Priority: Must = release requirement; Should = desirable after required behavior
 |---|---|---|---|
 | FR-01 | Must | Accept the CUPS backend invocation and job input forms required by the selected CUPS version, including file and standard-input jobs. | Integration tests exercise both input forms and required discovery/invocation behavior. |
 | FR-02 | Must | Identify the configured printer explicitly and resolve FF02 and FF03 by UUID. Numeric characteristic handles must not be hardcoded. | Logs and tests show the intended device, UUID resolution, and clear rejection when required capabilities are absent. |
-| FR-03 | Must | Establish an LE connection explicitly; no silent fallback to Classic Bluetooth. | Cold-start and reconnect tests establish LE successfully or produce an actionable error. |
+| FR-03 | Must | Establish an LE connection explicitly; no silent fallback to Classic Bluetooth. Reuse a fresh LE pairing connection, and permit generic `Device1.Connect` only when the fresh sole bond or a random address makes LE unambiguous. | Offline tests cover fresh-pair reuse, sole-bond reconnect, random-address reconnect, and fail-closed handling for an ambiguous public-address device. Cold-start and reconnect hardware tests establish LE successfully or produce an actionable error. |
 | FR-04 | Must | Before transmitting print data, reuse an existing LE bond or make one bounded automatic Just Works pairing attempt for the explicitly configured device. Pairing rejection, unsupported PIN/passkey methods, invalid bonds, and permission failures must produce a clear setup-required outcome without repeated attempts. | Offline tests verify exact-device agent filtering, timeout/cancellation cleanup, bond verification, and zero submitted bytes on failure; approved hardware testing confirms first-print enrollment. |
 | FR-05 | Must | Forward vendor filter output in order without unintended insertion, removal, or modification of bytes. | A recording transport verifies byte-for-byte equivalence, including multiple pages and binary payloads. |
 | FR-06 | Must | Use the validated acknowledged-write configuration as the initial transport policy, with chunks up to 182 bytes subject to actual connection/API constraints. | Tests verify response-enabled writes, ordering, limits, and failure reporting. |
@@ -112,7 +112,7 @@ Successful CUPS delivery and confirmed physical print completion must be disting
 - **Security:** restrict scanning, pairing-agent callbacks, and connections to the configured device and LE bearer. Automatic Just Works enrollment has no human confirmation or meaningful MITM protection, so administrators must verify the complete address before queue creation. Do not log keys, passkeys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
 - **Maintainability:** separate CUPS adaptation, BLE transport, and status policy; document version assumptions and protocol evidence. Runtime changes must have a clear rollback path.
 - **Observability:** log job identifier, stage, bytes submitted/acknowledged, transport configuration, elapsed time, and actionable errors. Detailed notification logging is opt-in or appropriately bounded.
-- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Identify required experimental BlueZ APIs and provide clear errors when absent.
+- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Prefer experimental BlueZ bearer-selection APIs when available, reuse a fresh pairing connection or unambiguous random-address LE device when they are absent, and provide clear errors for ambiguous public-address devices.
 - **Resource management:** close connections and descriptors, release locks, and handle broken pipes and process termination without leaving the printer permanently unavailable.
 
 ## 10. Integration constraints and design boundaries
@@ -172,6 +172,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 | BLE notification format differs from USB replies | Filter misinterprets state | Compare payloads and parser expectations; add a documented translation only if evidence requires it. |
 | Full-size uncompressed pages stress buffering or timing | Partial prints or long job times | Bounded streaming, acknowledged transport, realistic page tests, and measured performance. |
 | BlueZ experimental API or service permission differences | Works interactively but fails in CUPS | Explicit dependency/version checks and service-context testing. |
+| Existing public-address bond with no explicit bearer API | Generic connection could select Classic | Fail closed unless `ConnectDevice` is available or `PreferredBearer=le` is verified; the guarded generic fallback is limited to a fresh sole LE bond or random-address LE device. |
 | Unknown completion semantics | False success or duplicate retries | Separate delivery from physical completion; conservative retry policy and explicit release limitation if needed. |
 | Filter licensing/build dependencies | Distribution or installation blocked | GPLv3 project licensing, upstream attribution, and no manufacturer artifacts. |
 | Multiple clients, including phone app | Connection contention | Per-printer lock, clear busy reporting, and documented exclusive-use expectations. |

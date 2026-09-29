@@ -99,11 +99,14 @@ behavior require separate validation.
   little-endian compressed length. The footer contains two `ESC d 2` commands.
 
 The tested dual-mode printer required explicit LE bearer selection. The CUPS
-backend requests an LE connection when BlueZ supports `ConnectDevice` and
-otherwise verifies an administrator-provisioned `PreferredBearer=le`; it does
-not silently fall back to Classic Bluetooth or select a printer only by its
-advertised name. The backend and diagnostic do not modify the BlueZ bearer
-preference.
+backend requests an LE connection when BlueZ supports `ConnectDevice`. A fresh
+automatic pairing connection is already on the selected LE discovery path and
+is reused; if it closes, BlueZ reconnects the sole new LE bond. Existing devices
+with a random address are also LE-only and can use `Device1.Connect`. An existing
+public-address device instead requires `ConnectDevice` or an
+administrator-provisioned `PreferredBearer=le`. The backend does not silently
+fall back to Classic Bluetooth, select by advertised name, or modify the BlueZ
+bearer preference.
 
 ## CUPS backend and filter
 
@@ -124,7 +127,8 @@ uses acknowledged FF02 writes, FF03 notifications, bounded channels and waits,
 per-printer locking, and conservative retry/stop outcomes. If no LE bond exists,
 a print job makes one bounded Just Works pairing attempt for the exact configured
 device before transmitting data. Bearer configuration and any minimum D-Bus
-permission needed by the service identity must still be provisioned separately.
+permission needed by the service identity must still be provisioned separately
+for an ambiguous existing public-address device.
 
 The temporary pairing agent is not made the BlueZ default, rejects callbacks
 for every other device, and does not set `Trusted`, alter adapter settings, or
@@ -397,8 +401,9 @@ tests depend on optional CUPS tools or system libraries.
   established.
 - Media tracking, reconnect behavior, fault injection, long jobs, multi-page
   jobs, and broad firmware compatibility require further hardware validation.
-- Explicit LE requires BlueZ `ConnectDevice` support or an
-  administrator-provisioned `PreferredBearer=le` setting.
+- Existing public-address devices require BlueZ `ConnectDevice` support or an
+  administrator-provisioned `PreferredBearer=le` setting. Fresh automatic
+  pairing and random-address LE devices do not require those experimental APIs.
 - Classic PPD/filter workflows are deprecated in newer CUPS releases.
 - Backend queues are bounded, but the current raster filter constructs the
   converted output in memory.

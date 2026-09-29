@@ -152,11 +152,22 @@ async def explicit_le_connect(
         return reply
 
     try:
+        newly_paired = False
         if allow_pairing:
-            await ensure_paired(
+            newly_paired = await ensure_paired(
                 bus, call, path, props, cancel_event or asyncio.Event(), pair_timeout,
                 pairing_callback,
             )
+        if newly_paired:
+            if await device_connected(call):
+                # Device1.Pair connected over the LE discovery path and completed
+                # service discovery. Keep that selected bearer for Bleak to reuse.
+                return
+            # The new LE bond is the only bond because pairing was entered only
+            # after verifying that no bond existed. BlueZ selects the sole bonded
+            # bearer even when its experimental bearer-selection APIs are absent.
+            await connect_device(call)
+            return
         try:
             await call('org.bluez.Adapter1', 'ConnectDevice', 'a{sv}', [{
                 'Address': Variant('s', device.address),
@@ -173,12 +184,36 @@ async def explicit_le_connect(
                 except SetupRequiredError:
                     raise
                 except RuntimeError as fallback:
-                    raise RuntimeError(
-                        'BlueZ cannot select an LE bearer explicitly; ConnectDevice or '
-                        'PreferredBearer support is required'
-                    ) from fallback
+                    if address_type == 'random':
+                        # A random Bluetooth address cannot identify a BR/EDR
+                        # bearer, so Device1.Connect remains explicitly LE.
+                        await connect_device(call)
+                    else:
+                        raise RuntimeError(
+                            'BlueZ cannot select an LE bearer explicitly for this '
+                            'public-address device; ConnectDevice or PreferredBearer '
+                            'support is required'
+                        ) from fallback
     finally:
         bus.disconnect()
+
+
+async def device_connected(call):
+    reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
+        'org.bluez.Device1', 'Connected',
+    ])
+    value = getattr(reply.body[0], 'value', reply.body[0])
+    if not isinstance(value, bool):
+        raise RuntimeError('BlueZ Device1.Connected did not contain a boolean')
+    return value
+
+
+async def connect_device(call):
+    try:
+        await call('org.bluez.Device1', 'Connect')
+    except RuntimeError as exc:
+        if 'AlreadyConnected' not in str(exc):
+            raise
 
 
 async def connect_with_provisioned_le(call):
