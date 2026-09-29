@@ -129,7 +129,7 @@ The backend must also service CUPS side-channel requests while transmitting and 
 
 Initial transport settings are acknowledged writes, no artificial inter-write delay, and a maximum requested chunk size of 182 bytes. These settings are a tested starting point, not universal printer limits. The vendor output must not pass through the standalone sender's fixed SETUP/FOOTER validator or have the mobile-app setup prepended automatically.
 
-The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queue must override it with `w53h70`. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
+The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queue must override it with `w53h70`. Named labels and custom media are declared full-page imageable; A4 and Letter retain their hardware margins. This declares the CUPS imageable area only and does not establish physical full bleed or printable width. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
 
 ## 11. Delivery phases and gates
 

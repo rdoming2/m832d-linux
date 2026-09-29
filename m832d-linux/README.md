@@ -15,9 +15,11 @@ complete CUPS pipeline, all printer firmware, or the hardware acceptance matrix
 in [`M832D-BLE-Backend-BRD.md`](M832D-BLE-Backend-BRD.md).
 
 The initial BLE media target is the generated PPD's `w53h70` choice
-(approximately 53 × 70 mm). A4, Letter, other large media, final printable
-width, margins, feed calibration, multi-page behavior, fault recovery, and
-physical-completion detection remain outside the validated BLE scope.
+(approximately 53 × 70 mm). The generated PPD declares named labels and custom
+media full-page imageable, while retaining hardware margins for A4 and Letter.
+A4, Letter, other large media, final physical printable width, margins, feed
+calibration, multi-page behavior, fault recovery, and physical-completion
+detection remain outside the validated BLE scope.
 
 ## Safety and outcome semantics
 

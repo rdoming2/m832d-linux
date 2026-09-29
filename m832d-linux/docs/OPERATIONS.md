@@ -137,6 +137,12 @@ An A4 job produces roughly a megabyte of uncompressed raster and commands a
 much longer feed than the capture-validated 53 mm workflow. A4 is not currently
 a BLE release target.
 
+The generated PPD declares custom media, including a 2.25-inch-wide page, full
+page imageable. A4 and Letter retain their declared hardware margins. This is a
+CUPS imageable-area setting, not confirmation that the printer can physically
+print to every edge; printable width and custom-media feed behavior still
+require controlled hardware validation.
+
 ## Outcome and recovery
 
 - An ATT write response confirms transport acceptance only.

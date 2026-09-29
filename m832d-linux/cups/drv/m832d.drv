@@ -27,6 +27,7 @@ MediaSize "w110h146"
 HWMargins 5mm 10.58mm 5mm 10.58mm
 MediaSize "Letter"
 MediaSize "A4"
+HWMargins 0 0 0 0
 VariablePaperSize Yes
 MinSize 0mm 0mm
 MaxSize 216mm 0mm
