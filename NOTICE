@@ -4,4 +4,7 @@ The CUPS raster filter follows the protocol and CUPS raster handling approach
 used by vivier/phomemo-tools.  That project is GPLv3; see
 https://github.com/vivier/phomemo-tools for the upstream source and license.
 No manufacturer PPD, filter, capture, or proprietary source is distributed by
-this repository.
+this repository. The small capture-derived encoder fixtures under
+`research/artifacts/fixtures/` are retained for deterministic offline tests;
+the private and third-party evidence under `research/artifacts/local/` is
+ignored and is not distributed.

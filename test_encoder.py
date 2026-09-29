@@ -5,16 +5,17 @@ from PIL import Image
 from m832d import LZO, encode_image, validate
 
 HERE = Path(__file__).resolve().parent
+FIXTURES = HERE / 'research' / 'artifacts' / 'fixtures'
 
 class EncoderTests(unittest.TestCase):
     def test_captured_jobs(self):
         for name in ('test', 'best'):
-            width, height, raw = validate((HERE/f'{name}.bin').read_bytes())
+            width, height, raw = validate((FIXTURES/f'{name}.bin').read_bytes())
             self.assertEqual((width, height, len(raw)), (576, 164, 11808))
 
     def test_reencode_capture(self):
-        original = (HERE/'test.bin').read_bytes()
-        encoded = encode_image(HERE/'test.png')
+        original = (FIXTURES/'test.bin').read_bytes()
+        encoded = encode_image(FIXTURES/'test.png')
         self.assertEqual(validate(encoded), validate(original))
         self.assertEqual(encoded, original)
 
@@ -34,7 +35,7 @@ class EncoderTests(unittest.TestCase):
             self.assertEqual(validate(encode_image(p, width=8))[2], b'\x80')
 
     def test_bad_block_rejected(self):
-        job = bytearray((HERE/'test.bin').read_bytes())
+        job = bytearray((FIXTURES/'test.bin').read_bytes())
         job[30:33] = b'\xff\xff\xff'
         with self.assertRaises(ValueError):
             validate(bytes(job))
