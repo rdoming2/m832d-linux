@@ -49,3 +49,7 @@ class PairingFailedError(SetupRequiredError):
 
 class CancelledError(RuntimeError):
     """The scheduler or user cancelled the job."""
+
+
+class TransportCleanupError(RuntimeError):
+    """The BLE transport could not confirm that its connection was closed."""

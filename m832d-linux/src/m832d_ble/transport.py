@@ -1,7 +1,10 @@
 """Explicit-LE BlueZ/Bleak transport for the M832D."""
 import asyncio
 
-from .model import CancelledError, PairingRequiredError, SetupRequiredError
+from .model import (
+    CancelledError, PairingRequiredError, SetupRequiredError,
+    TransportCleanupError,
+)
 from .pairing import ensure_paired
 
 
@@ -19,38 +22,51 @@ class BleTransport:
         self.pairing_callback = pairing_callback or (lambda active: None)
         self.allow_pairing = allow_pairing
         self.client = None
+        self.device_path = None
+        self.owns_connection = False
         self.write_characteristic = None
         self.notify_characteristic = None
+        self.notifications_started = False
         self.submitted_bytes = 0
         self.acknowledged_bytes = 0
 
     async def connect(self):
         from bleak import BleakClient, BleakScanner
 
-        scanner_options = {'filters': {'Transport': 'le'}}
-        if self.config.adapter:
-            scanner_options['adapter'] = self.config.adapter
-        device = await BleakScanner.find_device_by_filter(
-            lambda found, advertisement: found.address.lower() == self.config.address.lower(),
-            timeout=self.config.scan_timeout,
-            bluez=scanner_options,
-        )
+        # A connected printer may stop advertising. Check BlueZ first so the
+        # filter can begin its readiness exchange without waiting for a full
+        # discovery timeout.
+        device = await find_connected_device(self.config)
         if device is None:
-            raise RuntimeError('Configured printer was not found during the bounded LE scan')
+            scanner_options = {'filters': {'Transport': 'le'}}
+            if self.config.adapter:
+                scanner_options['adapter'] = self.config.adapter
+            device = await BleakScanner.find_device_by_filter(
+                lambda found, advertisement: found.address.lower() == self.config.address.lower(),
+                timeout=self.config.scan_timeout,
+                bluez=scanner_options,
+            )
+        if device is None:
+            raise RuntimeError(
+                'Configured printer was not found during the bounded LE scan '
+                'or as an already-connected BlueZ LE device'
+            )
+        self.device_path = device.details.get('path')
         try:
-            await explicit_le_connect(
+            self.owns_connection = await explicit_le_connect(
                 device, self.config.adapter, self.cancel_event,
                 self.config.connect_timeout, self.allow_pairing,
                 self.pairing_callback,
             )
         except Exception as exc:
             if _is_authentication_error(exc):
-                raise SetupRequiredError(
+                exc = SetupRequiredError(
                     'LE authentication failed; automatic pairing or bond recovery is required'
-                ) from exc
-            raise
-        self.client = BleakClient(device, timeout=self.config.connect_timeout)
+                )
+            await self._rollback_connection()
+            raise exc
         try:
+            self.client = BleakClient(device, timeout=self.config.connect_timeout)
             await _wait_or_cancel(
                 self.client.connect(), self.cancel_event, self.config.connect_timeout,
                 'connection',
@@ -74,25 +90,58 @@ class BleTransport:
                 self.client.start_notify(self.notify_characteristic, self._notify),
                 self.cancel_event, self.config.connect_timeout, 'notification setup',
             )
+            self.notifications_started = True
         except Exception as exc:
             if _is_authentication_error(exc):
-                raise SetupRequiredError(
+                exc = SetupRequiredError(
                     'LE authentication failed; automatic pairing or bond recovery is required'
-                ) from exc
-            raise
+                )
+            await self._rollback_connection()
+            raise exc
 
     async def close(self):
-        if self.client is None:
-            return
+        client = self.client
+        device_path = self.device_path
+        owns_connection = self.owns_connection
+        cleanup_errors = []
         try:
-            if self.notify_characteristic is not None and self.client.is_connected:
-                await asyncio.wait_for(
-                    self.client.stop_notify(self.notify_characteristic), 5.0,
-                )
+            if (
+                    client is not None and self.notify_characteristic is not None
+                    and client.is_connected and self.notifications_started
+            ):
+                try:
+                    await asyncio.wait_for(client.stop_notify(self.notify_characteristic), 5.0)
+                except Exception as exc:
+                    cleanup_errors.append(exc)
         finally:
-            if self.client.is_connected:
-                await asyncio.wait_for(self.client.disconnect(), 5.0)
+            if client is not None:
+                try:
+                    if client.is_connected:
+                        await asyncio.wait_for(client.disconnect(), 5.0)
+                except Exception as exc:
+                    cleanup_errors.append(exc)
+            if owns_connection and device_path is not None:
+                try:
+                    if await device_connected_path(device_path):
+                        await disconnect_device_path(device_path)
+                except Exception as exc:
+                    cleanup_errors.append(exc)
             self.client = None
+            self.device_path = None
+            self.owns_connection = False
+            self.write_characteristic = None
+            self.notify_characteristic = None
+            self.notifications_started = False
+        if cleanup_errors:
+            raise TransportCleanupError(
+                f'BLE teardown failed: {cleanup_errors[-1]}'
+            ) from cleanup_errors[-1]
+
+    async def _rollback_connection(self):
+        try:
+            await self.close()
+        except TransportCleanupError:
+            pass
 
     async def write(self, data):
         if self.client is None or self.write_characteristic is None:
@@ -140,7 +189,9 @@ async def explicit_le_connect(
             'Configured printer is not paired on the LE bearer; '
             'diagnostics do not initiate pairing'
         )
-    bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+    bus = await asyncio.wait_for(
+        MessageBus(bus_type=BusType.SYSTEM).connect(), 5,
+    )
 
     async def call(interface, member, signature='', body=None, target=path):
         reply = await asyncio.wait_for(bus.call(Message(
@@ -151,7 +202,14 @@ async def explicit_le_connect(
             raise RuntimeError(f'{reply.error_name}: {reply.body}')
         return reply
 
+    initial_connected = False
+    owns_connection = False
     try:
+        initial_connected = await device_connected(call)
+        if initial_connected:
+            # A connected exact-address device may not advertise. Bleak can
+            # adopt it using the BlueZ object path discovered above.
+            return True
         newly_paired = False
         if allow_pairing:
             if address_type == 'public':
@@ -165,12 +223,12 @@ async def explicit_le_connect(
             if await device_connected(call):
                 # Device1.Pair connected over the LE discovery path and completed
                 # service discovery. Keep that selected bearer for Bleak to reuse.
-                return
+                return True
             # The new LE bond is the only bond because pairing was entered only
             # after verifying that no bond existed. BlueZ selects the sole bonded
             # bearer even when its experimental bearer-selection APIs are absent.
             await connect_device(call)
-            return
+            return True
         try:
             await call('org.bluez.Adapter1', 'ConnectDevice', 'a{sv}', [{
                 'Address': Variant('s', device.address),
@@ -178,7 +236,7 @@ async def explicit_le_connect(
             }], target=adapter_path)
         except RuntimeError as exc:
             if 'AlreadyConnected' in str(exc):
-                pass
+                owns_connection = True
             elif not any(marker in str(exc) for marker in ('UnknownMethod', 'NotSupported')):
                 raise
             else:
@@ -202,6 +260,17 @@ async def explicit_le_connect(
                             'public-address device; ConnectDevice or PreferredBearer '
                             'support is required'
                         ) from fallback
+        if not owns_connection:
+            owns_connection = True
+        return owns_connection
+    except BaseException:
+        if not initial_connected:
+            try:
+                if await device_connected(call):
+                    await call('org.bluez.Device1', 'Disconnect')
+            except Exception:
+                pass
+        raise
     finally:
         bus.disconnect()
 
@@ -214,6 +283,98 @@ async def device_connected(call):
     if not isinstance(value, bool):
         raise RuntimeError('BlueZ Device1.Connected did not contain a boolean')
     return value
+
+
+async def find_connected_device(config):
+    """Recover an exact configured LE device that is not advertising."""
+    from bleak.backends.device import BLEDevice
+    from dbus_fast import Message, MessageType, BusType
+    from dbus_fast.aio import MessageBus
+
+    bus = await asyncio.wait_for(
+        MessageBus(bus_type=BusType.SYSTEM).connect(), config.scan_timeout,
+    )
+    try:
+        reply = await asyncio.wait_for(bus.call(Message(
+            destination='org.bluez', path='/',
+            interface='org.freedesktop.DBus.ObjectManager',
+            member='GetManagedObjects', signature='', body=[],
+        )), config.scan_timeout)
+        if reply.message_type == MessageType.ERROR:
+            raise RuntimeError(f'{reply.error_name}: {reply.body}')
+        for path, interfaces in reply.body[0].items():
+            device_props = interfaces.get('org.bluez.Device1')
+            if device_props is None:
+                continue
+            props = {
+                name: getattr(value, 'value', value)
+                for name, value in device_props.items()
+            }
+            if str(props.get('Address', '')).lower() != config.address.lower():
+                continue
+            adapter_path = path.rsplit('/', 1)[0]
+            if config.adapter and adapter_path.rsplit('/', 1)[-1] != config.adapter:
+                continue
+            if props.get('Connected') is not True:
+                continue
+            address_type = props.get('AddressType')
+            if address_type not in ('public', 'random'):
+                continue
+            return BLEDevice(
+                config.address, props.get('Alias') or props.get('Name') or '',
+                {'path': path, 'props': props},
+            )
+        return None
+    finally:
+        bus.disconnect()
+
+
+async def device_connected_path(path):
+    """Read the exact device connection state through the system bus."""
+    from dbus_fast import Message, MessageType, BusType
+    from dbus_fast.aio import MessageBus
+
+    bus = await asyncio.wait_for(
+        MessageBus(bus_type=BusType.SYSTEM).connect(), 5,
+    )
+    try:
+        reply = await asyncio.wait_for(bus.call(Message(
+            destination='org.bluez', path=path,
+            interface='org.freedesktop.DBus.Properties', member='Get',
+            signature='ss', body=['org.bluez.Device1', 'Connected'],
+        )), 5)
+        if reply.message_type == MessageType.ERROR:
+            raise RuntimeError(f'{reply.error_name}: {reply.body}')
+        value = getattr(reply.body[0], 'value', reply.body[0])
+        if not isinstance(value, bool):
+            raise RuntimeError('BlueZ Device1.Connected did not contain a boolean')
+        return value
+    finally:
+        bus.disconnect()
+
+
+async def disconnect_device_path(path):
+    """Disconnect and verify the exact BlueZ device path."""
+    from dbus_fast import Message, MessageType, BusType
+    from dbus_fast.aio import MessageBus
+
+    bus = await asyncio.wait_for(
+        MessageBus(bus_type=BusType.SYSTEM).connect(), 5,
+    )
+    try:
+        reply = await asyncio.wait_for(bus.call(Message(
+            destination='org.bluez', path=path, interface='org.bluez.Device1',
+            member='Disconnect', signature='', body=[],
+        )), 5)
+        if reply.message_type == MessageType.ERROR:
+            raise RuntimeError(f'{reply.error_name}: {reply.body}')
+    finally:
+        bus.disconnect()
+    for _ in range(10):
+        if not await device_connected_path(path):
+            return
+        await asyncio.sleep(0.2)
+    raise TimeoutError('BlueZ did not confirm printer disconnection')
 
 
 async def connect_device(call):

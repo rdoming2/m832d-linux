@@ -9,7 +9,10 @@ from .channels import CupsChannels
 from .config import format_device_uri, parse_device_uri
 from .lock import PrinterLock
 from .log import error, info, state
-from .model import BackendExit, CancelledError, JobInvocation, SetupRequiredError
+from .model import (
+    BackendExit, CancelledError, JobInvocation, SetupRequiredError,
+    TransportCleanupError,
+)
 from .runtime import BackendRuntime
 from .transport import BleTransport
 
@@ -58,6 +61,7 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
     source = None
     connecting = False
     pairing = False
+    cleanup_error = None
 
     def pairing_status(active):
         nonlocal pairing
@@ -71,42 +75,53 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
     try:
         source = open(invocation.filename, 'rb') if invocation.filename else sys.stdin.buffer
         with PrinterLock(config.lock_key):
-            info(f'job {invocation.job_id}: connecting to configured LE printer')
-            state(add='connecting-to-device')
-            connecting = True
-            transport = transport_factory(
-                config, lambda data: runtime.notification(data), cancel_event,
-                pairing_status,
-            )
-            runtime = BackendRuntime(transport, channels, source, cancel_event)
-            connect_task = asyncio.create_task(transport.connect())
-            cancel_task = asyncio.create_task(cancel_event.wait())
-            done, _ = await asyncio.wait(
-                {connect_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancel_task in done and cancel_task.result():
-                connect_task.cancel()
-                await asyncio.gather(connect_task, return_exceptions=True)
-                raise CancelledError('Job cancelled while connecting')
-            cancel_task.cancel()
-            await asyncio.gather(cancel_task, return_exceptions=True)
-            await connect_task
-            state(remove='connecting-to-device')
-            connecting = False
-            info(f'job {invocation.job_id}: BLE ready; transmitting vendor-filter output')
-            await runtime.run()
-            if runtime.back_channel_closed:
-                info(
-                    f'job {invocation.job_id}: filter closed the back channel; '
-                    'remaining notifications were discarded'
+            try:
+                info(f'job {invocation.job_id}: connecting to configured LE printer')
+                state(add='connecting-to-device')
+                connecting = True
+                transport = transport_factory(
+                    config, lambda data: runtime.notification(data), cancel_event,
+                    pairing_status,
                 )
-            info(
-                f'job {invocation.job_id}: submitted={transport.submitted_bytes} '
-                f'acknowledged={transport.acknowledged_bytes} '
-                f'elapsed={time.monotonic() - started:.3f}s; '
-                'physical completion is unconfirmed'
-            )
-            return BackendExit.OK
+                runtime = BackendRuntime(transport, channels, source, cancel_event)
+                connect_task = asyncio.create_task(transport.connect())
+                cancel_task = asyncio.create_task(cancel_event.wait())
+                done, _ = await asyncio.wait(
+                    {connect_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
+                )
+                if cancel_task in done and cancel_task.result():
+                    connect_task.cancel()
+                    await asyncio.gather(connect_task, return_exceptions=True)
+                    raise CancelledError('Job cancelled while connecting')
+                cancel_task.cancel()
+                await asyncio.gather(cancel_task, return_exceptions=True)
+                await connect_task
+                state(remove='connecting-to-device')
+                connecting = False
+                info(f'job {invocation.job_id}: BLE ready; transmitting vendor-filter output')
+                await runtime.run()
+                if runtime.back_channel_closed:
+                    info(
+                        f'job {invocation.job_id}: filter closed the back channel; '
+                        'remaining notifications were discarded'
+                    )
+                info(
+                    f'job {invocation.job_id}: submitted={transport.submitted_bytes} '
+                    f'acknowledged={transport.acknowledged_bytes} '
+                    f'elapsed={time.monotonic() - started:.3f}s; '
+                    'physical completion is unconfirmed'
+                )
+                result = BackendExit.OK
+            finally:
+                if transport is not None:
+                    try:
+                        await transport.close()
+                    except Exception as exc:
+                        cleanup_error = exc
+                        error(f'job {invocation.job_id}: cleanup failed: {exc}')
+            if cleanup_error is not None:
+                raise TransportCleanupError(str(cleanup_error)) from cleanup_error
+            return result
     except SetupRequiredError as exc:
         error(f'job {invocation.job_id}: setup required: {exc}')
         state(add='authentication-required')
@@ -138,11 +153,6 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
             state(remove='connecting-to-device')
         if pairing:
             state(remove='authentication-required')
-        if transport is not None:
-            try:
-                await transport.close()
-            except Exception as exc:
-                error(f'job {invocation.job_id}: cleanup failed: {exc}')
         if invocation.filename and source is not None:
             source.close()
 

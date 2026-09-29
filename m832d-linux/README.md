@@ -139,6 +139,14 @@ before creating the queue. Pairing rejection, PIN/passkey requirements, stale
 keys, or insufficient service permissions hold the job with zero submitted
 bytes instead of looping.
 
+Pairing, trust, and the selected LE bearer are persistent setup; the active BLE
+connection is not. Each job holds the per-printer lock through notification
+shutdown and verified disconnect. If the printer is already connected and no
+advertisement is available, the backend recovers the exact configured device
+from BlueZ and adopts that LE connection. If disconnect cannot be confirmed,
+the backend reports cleanup failure; after any submitted bytes it stops the
+queue rather than replaying the job automatically.
+
 `m832dble-diagnose` performs a non-printing check of scanning, connection,
 bond/access state, FF02/FF03 capabilities, and notification subscription. It
 does not pair, send status queries, or send raster data; an unpaired printer is
@@ -410,6 +418,9 @@ tests depend on optional CUPS tools or system libraries.
 - Backend queues are bounded, but the current raster filter constructs the
   converted output in memory.
 - Competing Bluetooth clients can prevent or interrupt a connection.
+- A competing client or an unconfirmed post-job disconnect requires operator
+  inspection before releasing or resubmitting a job; forgetting the device is
+  not part of normal repeated printing.
 
 ## Licensing and third-party material
 

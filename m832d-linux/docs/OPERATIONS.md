@@ -149,6 +149,16 @@ a BLE release target.
 - A disconnect or write error after submission stops the queue and reports an
   uncertain partial print. Inspect the paper and logs before explicitly
   releasing or resubmitting the job.
+- The backend keeps the printer lock until its job-owned connection has been
+  disconnected and BlueZ reports it closed. If the printer is already
+  connected but not advertising, the backend recovers the exact configured
+  device from BlueZ and adopts that LE connection. Other clients may still
+  interrupt the connection.
+- Pairing, trust, and `PreferredBearer=le` remain persistent; forgetting and
+  re-trusting the printer between ordinary jobs is not expected. If teardown
+  cannot be confirmed, inspect competing clients and the BlueZ connection
+  before explicitly releasing the job. Do not replay a job after submission
+  merely because cleanup failed.
 - Cancellation stops new writes, but bytes already accepted may still print.
 
 Backend messages are sent to CUPS on stderr. They include the job identifier,
