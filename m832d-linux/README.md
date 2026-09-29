@@ -138,6 +138,219 @@ The installer does not create queues, pair the printer, set BlueZ preferences,
 change D-Bus policy, restart CUPS, or install Python dependencies. A plain
 `pip install` also does not perform the complete CUPS deployment.
 
+## Install the CUPS components
+
+### Build the generated PPD
+
+`ppdc` compiles the project-owned driver source into a PPD. This is an offline
+build step and does not install files or contact the printer:
+
+```sh
+make ppd
+```
+
+The default output is `build/ppd/Phomemo-M832D.ppd`. Override the build
+directory with `PPD_BUILD`, if needed:
+
+```sh
+make PPD_BUILD=/tmp/m832d-ppd ppd
+```
+
+Remove the generated PPD build directory with:
+
+```sh
+make clean
+```
+
+Use the same `PPD_BUILD` override with `make clean` when a custom output
+directory was selected.
+
+### Install
+
+The installer requires:
+
+- Python 3.10 or newer, with Bleak and dbus-fast available to the selected
+  interpreter;
+- `cups-config` and `ppdc`;
+- the system `libcups` library; and
+- permission to write to the selected Python, CUPS, and prefix directories.
+
+After reviewing the script, install from this source directory:
+
+```sh
+sudo make install
+```
+
+`make install` runs `scripts/install.sh`, which compiles a fresh PPD before
+installing it. The script can also be invoked directly with
+`sudo ./scripts/install.sh`.
+
+The script installs:
+
+- the `m832d_ble`, `m832d_filter`, and `m832d_protocol` Python packages into
+  the selected interpreter's `purelib` directory;
+- the `m832dble` CUPS backend into CUPS's backend directory;
+- the `rastertom832d` CUPS filter into CUPS's filter directory;
+- a generated `Phomemo-M832D.ppd` into CUPS's model directory; and
+- `m832dble-diagnose` under the selected prefix, `/usr/local` by default.
+
+`PYTHON`, `PYTHON_LIB`, `CUPS_SERVERBIN`, `CUPS_DATADIR`, `PREFIX`, and
+`DESTDIR` can override detected installation paths. Pass overrides to `make`,
+for example `sudo make PYTHON=/usr/bin/python3 PREFIX=/usr/local install`. The
+selected Python must have the runtime dependencies installed before the script
+is run. The installer reports the installed paths and versions but does not
+restart CUPS or create a printer queue.
+
+Continue with the pairing, diagnostic, and separate queue procedure in
+[`docs/OPERATIONS.md`](docs/OPERATIONS.md). Keep any manufacturer USB queue as
+an independent reference.
+
+## Uninstall the CUPS components
+
+Stop submitting jobs to the dedicated BLE queue and inspect it for pending or
+uncertain jobs. Then remove the project-installed files from this source
+directory:
+
+```sh
+sudo make uninstall
+```
+
+`make uninstall` runs `scripts/uninstall.sh`; the script can also be invoked
+directly with `sudo ./scripts/uninstall.sh`.
+
+If installation used path overrides, supply the same `PYTHON`, `PYTHON_LIB`,
+`CUPS_SERVERBIN`, `CUPS_DATADIR`, `PREFIX`, and `DESTDIR` values when
+uninstalling. The script removes the backend, filter, generated PPD, diagnostic,
+and the three installed Python packages.
+
+The uninstaller deliberately leaves all CUPS queues, manufacturer drivers,
+Bluetooth pairing, and BlueZ settings untouched. If the dedicated BLE queue is
+no longer needed, remove it separately after confirming the queue name:
+
+```sh
+sudo lpadmin -x M832D-BLE
+```
+
+Do not remove or rename an existing USB or manufacturer queue.
+
+## Set up a CUPS printer
+
+Install the project components before creating a queue. Identify the generated
+PPD's CUPS model name with:
+
+```sh
+lpinfo -m
+```
+
+Find the `Phomemo-M832D.ppd` entry and use its first field as the value passed
+to `lpadmin -m`. The examples below use `Phomemo-M832D.ppd`; use the exact model
+name reported by the local CUPS installation if it differs.
+
+Queue creation is a hardware deployment action. Use separately named test
+queues, preserve existing manufacturer queues, and do not submit a job merely
+to verify queue creation.
+
+### USB queue
+
+Connect and power on the intended printer, then ask the standard CUPS backends
+to report available device URIs:
+
+```sh
+lpinfo -v
+```
+
+Locate the entry for the intended M832D and copy its complete `usb://` URI. A
+typical entry resembles this, but the manufacturer, model, escaping, and query
+parameters vary by device:
+
+```text
+direct usb://Phomemo/M832D?serial=DEVICE_SERIAL
+```
+
+Do not construct a USB URI from the example or remove its serial/query values;
+use the exact URI reported for the intended physical printer. Create a separate
+USB queue with that URI:
+
+```sh
+sudo lpadmin -p M832D-USB -E \
+  -v 'usb://Phomemo/M832D?serial=DEVICE_SERIAL' \
+  -m 'Phomemo-M832D.ppd' \
+  -o PageSize=w53h70 \
+  -o printer-error-policy=stop-printer
+```
+
+Replace both placeholders with the discovered URI and model name. Confirm the
+result without printing:
+
+```sh
+lpstat -v M832D-USB
+lpoptions -p M832D-USB -l
+```
+
+See [`docs/USB-OPERATIONS.md`](docs/USB-OPERATIONS.md) before an approved USB
+hardware test.
+
+### BLE queue
+
+Pair the intended printer using normal BlueZ tooling before queue creation.
+After the backend is installed, BLE discovery through CUPS reports candidate
+device URIs:
+
+```sh
+lpinfo -v
+```
+
+The backend reports an explicit address in a URI resembling:
+
+```text
+direct m832dble://AA-BB-CC-DD-EE-FF/
+```
+
+Verify that the address belongs to the intended, paired physical printer; do
+not select it by advertised name alone. Identify the BlueZ adapter interface
+that CUPS must use. Adapter interfaces are normally named `hci0`, `hci1`, and
+so on, and can be listed without changing configuration:
+
+```sh
+ls -1 /sys/class/bluetooth
+bluetoothctl list
+```
+
+If multiple controllers are present, use the local BlueZ tooling to match the
+chosen controller address to its `hci` interface rather than assuming `hci0`.
+Build the final URI by retaining the hyphen-separated printer address and
+adding the verified adapter after the slash:
+
+```text
+m832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0
+```
+
+Use the non-printing diagnostic before creating the queue:
+
+```sh
+m832dble-diagnose 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0'
+```
+
+Then create a separately named BLE queue:
+
+```sh
+sudo lpadmin -p M832D-BLE -E \
+  -v 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0' \
+  -m 'Phomemo-M832D.ppd' \
+  -o PageSize=w53h70 \
+  -o printer-error-policy=stop-printer
+```
+
+Confirm the configured URI and options without submitting a job:
+
+```sh
+lpstat -v M832D-BLE
+lpoptions -p M832D-BLE -l
+```
+
+Follow [`docs/OPERATIONS.md`](docs/OPERATIONS.md) for pairing, service-identity
+diagnosis, explicit-LE requirements, testing, and recovery.
+
 ## Offline validation
 
 Run the complete offline suite from this directory:

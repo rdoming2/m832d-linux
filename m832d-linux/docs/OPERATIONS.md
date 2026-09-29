@@ -52,25 +52,64 @@ does not install a permissive D-Bus rule.
 
 ## Create the separate queue
 
-Queue creation is an administrator deployment action. Select the already
-installed M832D PPD and use an explicit address and adapter. For example:
+Queue creation is an administrator deployment action. After installing the
+backend, list CUPS device records:
+
+```sh
+lpinfo -v
+```
+
+The BLE backend reports candidates in this form:
+
+```text
+direct m832dble://AA-BB-CC-DD-EE-FF/
+```
+
+Verify that the address belongs to the intended paired printer; do not select a
+printer by advertised name alone. Identify the BlueZ adapter interface that the
+CUPS service must use. List adapter interfaces and controllers without changing
+their configuration:
+
+```sh
+ls -1 /sys/class/bluetooth
+bluetoothctl list
+```
+
+Adapter interfaces are normally named `hci0`, `hci1`, and so on. If multiple
+controllers are present, match the chosen controller address to its interface
+instead of assuming `hci0`. Add the verified interface to the discovered URI
+after the slash:
+
+```text
+m832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0
+```
+
+Find the installed generated PPD's CUPS model identifier with `lpinfo -m` and
+use the first field of its `Phomemo-M832D.ppd` entry. The following example
+assumes that identifier is `Phomemo-M832D.ppd`:
 
 ```sh
 sudo lpadmin -p M832D-BLE -E \
   -v 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0' \
-  -P /path/to/the/installed/M832D.ppd \
+  -m 'Phomemo-M832D.ppd' \
   -o PageSize=w53h70 \
   -o printer-error-policy=stop-printer
 ```
 
-Use the PPD already installed on the host; do not copy it from this repository
-for redistribution. Confirm the resulting queue does not replace or rename the
-USB queue. The `stop-printer` policy is intentional: a backend failure after
-submission is uncertain and must not silently replay a whole job.
+Use the exact model identifier reported by the local CUPS installation. Confirm
+the resulting queue does not replace or rename the USB queue. The
+`stop-printer` policy is intentional: a backend failure after submission is
+uncertain and must not silently replay a whole job. Verify the queue without
+printing:
 
-The initial BLE validation target is the PPD's `w53h70` media choice. The
-manufacturer PPD itself defaults to A4, so select `w53h70` explicitly when an
-application supplies its own media setting. For a controlled test:
+```sh
+lpstat -v M832D-BLE
+lpoptions -p M832D-BLE -l
+```
+
+The generated PPD defaults to `w53h70`, which is the initial BLE validation
+target. Select `w53h70` explicitly when an application supplies its own media
+setting. For a controlled test:
 
 ```sh
 lp -d M832D-BLE -o PageSize=w53h70 -o fit-to-page document.pdf

@@ -68,6 +68,77 @@ PYTHONPATH=src python -m unittest discover -v
 The suite does not contact the printer. See the nested README for dependency,
 standalone sender, CUPS deployment, and known-limitation details.
 
+## CUPS installation and removal
+
+Build the generated PPD without installing anything:
+
+```sh
+cd m832d-linux
+make ppd
+```
+
+The PPD is written under `build/ppd/`. Run `make clean` to remove that generated
+build output.
+
+The CUPS backend, raster filter, generated PPD, Python packages, and diagnostic
+are installed from the maintained project directory:
+
+```sh
+cd m832d-linux
+sudo make install
+```
+
+Review the installer and the prerequisites in
+[`m832d-linux/README.md`](m832d-linux/README.md) before running it. Installation
+does not create a queue, pair a printer, restart CUPS, or alter BlueZ settings.
+
+Remove only the files installed by the project with:
+
+```sh
+cd m832d-linux
+sudo make uninstall
+```
+
+Uninstallation deliberately preserves CUPS queues, manufacturer drivers,
+pairing, and BlueZ configuration. See
+[`docs/OPERATIONS.md`](m832d-linux/docs/OPERATIONS.md) for queue creation and
+optional removal procedures.
+
+## Printer queue setup
+
+After installation, use `lpinfo -v` to list device URIs and `lpinfo -m` to find
+the installed `Phomemo-M832D.ppd` model identifier. For USB, copy the complete
+`usb://` URI reported for the intended physical printer, including its serial
+or other query parameters:
+
+```sh
+sudo lpadmin -p M832D-USB -E \
+  -v 'usb://Phomemo/M832D?serial=DEVICE_SERIAL' \
+  -m 'Phomemo-M832D.ppd' \
+  -o PageSize=w53h70 \
+  -o printer-error-policy=stop-printer
+```
+
+For BLE, `lpinfo -v` reports an address-based URI such as
+`m832dble://AA-BB-CC-DD-EE-FF/`. Verify the physical printer and BlueZ adapter,
+then add the adapter query to form the queue URI:
+
+```sh
+sudo lpadmin -p M832D-BLE -E \
+  -v 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0' \
+  -m 'Phomemo-M832D.ppd' \
+  -o PageSize=w53h70 \
+  -o printer-error-policy=stop-printer
+```
+
+These are templates, not literal device identities. Use the exact URI and PPD
+model name reported locally, keep the USB and BLE queues separate, and do not
+select a BLE printer by advertised name alone. Detailed discovery, diagnostic,
+and non-printing verification steps are in the nested
+[`README.md`](m832d-linux/README.md),
+[`docs/OPERATIONS.md`](m832d-linux/docs/OPERATIONS.md), and
+[`docs/USB-OPERATIONS.md`](m832d-linux/docs/USB-OPERATIONS.md).
+
 ## Licensing
 
 The `m832d-linux/` project is distributed under GPLv3; see
