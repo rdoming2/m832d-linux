@@ -1,6 +1,6 @@
 # Business Requirements Document: Phomemo M832D BLE Backend for Linux
 
-Version: 1.1 — Draft for review
+Version: 1.3 — Draft for review
 Date: 2026-09-29
 Target environment: Linux, BlueZ, CUPS, Phomemo M832D
 
@@ -81,16 +81,16 @@ Priority: Must = release requirement; Should = desirable after required behavior
 |---|---|---|---|
 | FR-01 | Must | Accept the CUPS backend invocation and job input forms required by the selected CUPS version, including file and standard-input jobs. | Integration tests exercise both input forms and required discovery/invocation behavior. |
 | FR-02 | Must | Identify the configured printer explicitly and resolve FF02 and FF03 by UUID. Numeric characteristic handles must not be hardcoded. | Logs and tests show the intended device, UUID resolution, and clear rejection when required capabilities are absent. |
-| FR-03 | Must | Establish an LE connection explicitly; no silent fallback to Classic Bluetooth. | Cold-start and reconnect tests establish LE successfully or produce an actionable error. |
-| FR-04 | Must | Before transmitting print data, reuse an existing LE bond or make one bounded automatic Just Works pairing attempt for the explicitly configured device. Pairing rejection, unsupported PIN/passkey methods, invalid bonds, and permission failures must produce a clear setup-required outcome without repeated attempts. | Offline tests verify exact-device agent filtering, timeout/cancellation cleanup, bond verification, and zero submitted bytes on failure; approved hardware testing confirms first-print enrollment. |
+| FR-03 | Must | Establish an LE connection explicitly; no silent fallback to Classic Bluetooth. For a public-address device, set and verify `PreferredBearer=le` before pairing or connecting. Reuse a fresh LE pairing connection, and permit generic `Device1.Connect` only when the preference, fresh sole bond, or a random address makes LE unambiguous. | Offline tests cover preference provisioning, fresh-pair reuse, sole-bond reconnect, random-address reconnect, and fail-closed handling when the preference cannot be set. Cold-start and reconnect hardware tests establish LE successfully or produce an actionable error. |
+| FR-04 | Must | Before transmitting print data, reuse an existing LE bond or make one bounded automatic Just Works pairing attempt for the explicitly configured device, then set `Trusted=true` only after bond verification. Pairing rejection, unsupported PIN/passkey methods, invalid bonds, property-write failures, and permission failures must produce a clear setup-required outcome without repeated attempts. | Offline tests verify exact-device agent filtering, property writes, timeout/cancellation cleanup, bond verification, and zero submitted bytes on failure; approved hardware testing confirms first-print enrollment. |
 | FR-05 | Must | Forward vendor filter output in order without unintended insertion, removal, or modification of bytes. | A recording transport verifies byte-for-byte equivalence, including multiple pages and binary payloads. |
 | FR-06 | Must | Use the validated acknowledged-write configuration as the initial transport policy, with chunks up to 182 bytes subject to actual connection/API constraints. | Tests verify response-enabled writes, ordering, limits, and failure reporting. |
 | FR-07 | Must | Deliver printer notifications to the CUPS back channel in order, using the representation expected by the filter. | Filter queries receive their replies; split/coalesced delivery is tested against the filter parser. |
 | FR-08 | Must | Implement the CUPS side-channel operations required by the filter, including output drain. Define drain as host-side pending output accepted through the transport, distinct from physical printing. | Drain completes only after prior buffered writes are acknowledged; faults return appropriate responses without indefinite waits. |
-| FR-09 | Must | Serialize access per printer so concurrent jobs or queues cannot interleave print streams. | Two simultaneous job attempts result in serialized delivery or an explicit busy outcome. |
+| FR-09 | Must | Serialize access per printer so concurrent jobs or queues cannot interleave print streams; hold the lock through verified connection teardown. An already-connected exact configured device may be adopted when it is not advertising. | Two simultaneous job attempts result in serialized delivery or an explicit busy outcome, and the next attempt starts only after the prior job's connection is closed. |
 | FR-10 | Must | Maintain bounded memory and bounded waits while handling large pages and status traffic. | Full-page and fault tests show controlled buffering and no deadlock. |
 | FR-11 | Must | Handle cancellation promptly and stop submitting additional print data; report that already accepted data may still print. | Mid-job cancellation test confirms transmission stops and records partial-job uncertainty. |
-| FR-12 | Must | Distinguish no-data-sent failures from failures after data may have reached the printer. Apply retry policy accordingly. | Injected failures before, during, and after upload produce the specified queue behavior. |
+| FR-12 | Must | Distinguish no-data-sent failures from failures after data may have reached the printer, including unconfirmed disconnect cleanup. Apply retry policy accordingly. | Injected failures before, during, and after upload, plus teardown failures, produce the specified queue behavior. |
 | FR-13 | Must | Report job outcome consistently with CUPS semantics and supported printer evidence. A fixed delay or ATT acknowledgment alone must not be presented as confirmed physical completion. | Completion policy is documented and validated against the filter and observed printer behavior. |
 | FR-14 | Must | Provide installation, pairing, queue creation, diagnostics, upgrade, and removal instructions. Preserve the USB queue. | Setup and rollback are demonstrated on the target host. |
 | FR-15 | Should | Provide a diagnostic command that checks device availability, bond/access, services, and transport configuration without printing. | Command distinguishes common setup faults and does not send a raster job. |
@@ -109,10 +109,10 @@ Successful CUPS delivery and confirmed physical print completion must be disting
 
 - **Reliability:** no interleaving, silent byte loss, unlimited retry loops, or indefinite side-channel waits.
 - **Performance:** baseline the tested full-page workload and record rendering, connection, upload, and completion-observation times separately. Numeric service targets will be agreed after this baseline; current small-image timings do not establish full-page performance.
-- **Security:** restrict scanning, pairing-agent callbacks, and connections to the configured device and LE bearer. Automatic Just Works enrollment has no human confirmation or meaningful MITM protection, so administrators must verify the complete address before queue creation. Do not log keys, passkeys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
+- **Security:** restrict scanning, pairing-agent callbacks, bearer preference, trust changes, and connections to the configured device and LE bearer. Automatic Just Works enrollment has no human confirmation or meaningful MITM protection, so administrators must verify the complete address before queue creation. Do not log keys, passkeys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
 - **Maintainability:** separate CUPS adaptation, BLE transport, and status policy; document version assumptions and protocol evidence. Runtime changes must have a clear rollback path.
 - **Observability:** log job identifier, stage, bytes submitted/acknowledged, transport configuration, elapsed time, and actionable errors. Detailed notification logging is opt-in or appropriately bounded.
-- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Identify required experimental BlueZ APIs and provide clear errors when absent.
+- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Prefer experimental BlueZ bearer-selection APIs when available, reuse a fresh pairing connection or unambiguous random-address LE device when they are absent, and provide clear errors for ambiguous public-address devices.
 - **Resource management:** close connections and descriptors, release locks, and handle broken pipes and process termination without leaving the printer permanently unavailable.
 
 ## 10. Integration constraints and design boundaries
@@ -129,7 +129,7 @@ The backend must also service CUPS side-channel requests while transmitting and 
 
 Initial transport settings are acknowledged writes, no artificial inter-write delay, and a maximum requested chunk size of 182 bytes. These settings are a tested starting point, not universal printer limits. The vendor output must not pass through the standalone sender's fixed SETUP/FOOTER validator or have the mobile-app setup prepended automatically.
 
-The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queue must override it with `w53h70`. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
+The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queue must override it with `w53h70`. Named labels and custom media are declared full-page imageable; A4 and Letter retain their hardware margins. This declares the CUPS imageable area only and does not establish physical full bleed or printable width. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
 
 ## 11. Delivery phases and gates
 
@@ -172,6 +172,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 | BLE notification format differs from USB replies | Filter misinterprets state | Compare payloads and parser expectations; add a documented translation only if evidence requires it. |
 | Full-size uncompressed pages stress buffering or timing | Partial prints or long job times | Bounded streaming, acknowledged transport, realistic page tests, and measured performance. |
 | BlueZ experimental API or service permission differences | Works interactively but fails in CUPS | Explicit dependency/version checks and service-context testing. |
+| Existing public-address bond with no writable explicit bearer API | Generic connection could select Classic | Set and verify `PreferredBearer=le` for the exact device or fail closed; the guarded generic fallback is limited to a verified preference, fresh sole LE bond, or random-address LE device. |
 | Unknown completion semantics | False success or duplicate retries | Separate delivery from physical completion; conservative retry policy and explicit release limitation if needed. |
 | Filter licensing/build dependencies | Distribution or installation blocked | GPLv3 project licensing, upstream attribution, and no manufacturer artifacts. |
 | Multiple clients, including phone app | Connection contention | Per-printer lock, clear busy reporting, and documented exclusive-use expectations. |

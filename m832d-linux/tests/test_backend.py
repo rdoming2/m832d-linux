@@ -45,6 +45,8 @@ class RecordingTransport:
 
     async def close(self):
         self.closed = True
+        if self.failure == 'cleanup':
+            raise RuntimeError('injected cleanup failure')
 
 
 class BackendOutcomeTests(unittest.IsolatedAsyncioTestCase):
@@ -107,6 +109,20 @@ class BackendOutcomeTests(unittest.IsolatedAsyncioTestCase):
             self.invocation, self.config, FakeChannels(), RecordingTransport,
         )
         self.assertEqual(result, BackendExit.STOP)
+
+    async def test_cleanup_failure_after_submission_stops_queue(self):
+        RecordingTransport.failure = 'cleanup'
+        result = await run_job(
+            self.invocation, self.config, FakeChannels(), RecordingTransport,
+        )
+        self.assertEqual(result, BackendExit.STOP)
+
+    async def test_cleanup_failure_before_submission_is_retryable(self):
+        RecordingTransport.failure = 'connect'
+        result = await run_job(
+            self.invocation, self.config, FakeChannels(), RecordingTransport,
+        )
+        self.assertEqual(result, BackendExit.RETRY)
 
 
 class BackendMainTests(unittest.TestCase):

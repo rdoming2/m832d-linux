@@ -12,7 +12,7 @@ AGENT_MANAGER_PATH = '/org/bluez'
 AGENT_INTERFACE = 'org.bluez.Agent1'
 AGENT_MANAGER_INTERFACE = 'org.bluez.AgentManager1'
 DEVICE_INTERFACE = 'org.bluez.Device1'
-LE_BEARER_INTERFACES = ('org.bluez.Bearer.LE1', 'org.bluez.Bearer1')
+LE_BEARER_INTERFACE = 'org.bluez.Bearer.LE1'
 
 
 class ExactDeviceAgent(ServiceInterface):
@@ -90,12 +90,10 @@ async def pairing_state(call, device_path, discovered_props=None):
                 paired = _property_bool(properties, 'Paired')
                 bonded = _property_bool(properties, 'Bonded')
                 device_state = paired is True and bonded is not False
-            if not path.startswith(device_path + '/'):
+            if path != device_path and not path.startswith(device_path + '/'):
                 continue
-            for interface in LE_BEARER_INTERFACES:
-                properties = interfaces.get(interface)
-                if properties is None or not _is_le_bearer(interface, properties):
-                    continue
+            properties = interfaces.get(LE_BEARER_INTERFACE)
+            if properties is not None:
                 paired = _property_bool(properties, 'Paired')
                 bonded = _property_bool(properties, 'Bonded')
                 bearer_states.append(paired is True and bonded is not False)
@@ -230,17 +228,6 @@ def _property_bool(properties, name):
     value = properties.get(name)
     value = getattr(value, 'value', value)
     return value if isinstance(value, bool) else None
-
-
-def _is_le_bearer(interface, properties):
-    if interface == 'org.bluez.Bearer.LE1':
-        return True
-    for name in ('Type', 'AddressType', 'Bearer'):
-        value = properties.get(name)
-        value = getattr(value, 'value', value)
-        if isinstance(value, str):
-            return value.lower() in ('le', 'random')
-    return False
 
 
 def _is_unsupported_inspection(exc):

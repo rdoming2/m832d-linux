@@ -7,9 +7,12 @@ manufacturer USB queue until USB and BLE acceptance testing are complete.
 ## Supported baseline
 
 Initial development used CUPS 2.4.19, BlueZ 5.87, Python 3.14, Bleak 3.0.2,
-and dbus-fast 5.0.22. Other versions are not yet validated. The BlueZ
-`ConnectDevice` or `PreferredBearer` API must be available so the backend can
-select LE explicitly.
+and dbus-fast 5.0.22. Other versions are not yet validated. The backend prefers
+BlueZ `ConnectDevice`, but it can reuse a fresh LE pairing connection or connect
+an existing random-address LE device without experimental BlueZ APIs. An
+existing public-address device still requires `ConnectDevice` or a verified
+`PreferredBearer=le` setting so Classic cannot be selected silently. The print
+pipeline provisions and verifies that device property when it is available.
 
 ## Install
 
@@ -47,20 +50,23 @@ m832dble-diagnose 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0'
 The diagnostic performs a bounded LE scan and connection, resolves FF02/FF03,
 and subscribes to notifications. It does not pair, send status queries, or send
 raster data. An unpaired printer therefore reports setup required. It does not
-set `PreferredBearer`; on BlueZ versions without `ConnectDevice`, an
-administrator must provision and verify `PreferredBearer=le` separately.
-Failure under the CUPS identity, despite success as a desktop user, indicates a
-bond, BlueZ API, or system-bus permission problem. Determine the minimum local
-permission change required before modifying policy; automatic pairing
-additionally requires permission to register an agent and call `Device1.Pair`.
-This package does not install a permissive D-Bus rule.
+set `PreferredBearer` or `Trusted`. The print pipeline does: for a public-address
+device it sets and verifies `PreferredBearer=le` before pairing or connecting,
+then sets `Trusted=true` after verifying the LE bond. Random-address LE devices
+do not need a bearer preference. Failure under the CUPS identity, despite
+success as a desktop user, indicates a bond, BlueZ API, or system-bus permission
+problem. Determine the minimum local permission change required before modifying
+policy; automatic setup requires permission to write those exact-device
+properties, register an agent, and call `Device1.Pair`. This package does not
+install a permissive D-Bus rule.
 
-The backend never sets `Trusted`, makes its agent the BlueZ default, changes
-adapter pairability/discoverability, or removes a bond. Pairing rejection,
-PIN/passkey requests, timeouts, stale keys, and permission failures hold the job
-with zero submitted bytes. Recover a stale bond by explicitly removing it with
-normal administrator BlueZ tooling, re-verifying the address, and releasing or
-resubmitting the held job; bond removal is never automatic.
+The backend never makes its agent the BlueZ default, changes adapter
+pairability/discoverability, or removes a bond. It changes only the configured
+device's `PreferredBearer` and `Trusted` properties described above. Pairing
+rejection, PIN/passkey requests, timeouts, stale keys, and permission failures
+hold the job with zero submitted bytes. Recover a stale bond by explicitly
+removing it with normal administrator BlueZ tooling, re-verifying the address,
+and releasing or resubmitting the held job; bond removal is never automatic.
 
 ## Create the separate queue
 
@@ -131,6 +137,12 @@ An A4 job produces roughly a megabyte of uncompressed raster and commands a
 much longer feed than the capture-validated 53 mm workflow. A4 is not currently
 a BLE release target.
 
+The generated PPD declares custom media, including a 2.25-inch-wide page, full
+page imageable. A4 and Letter retain their declared hardware margins. This is a
+CUPS imageable-area setting, not confirmation that the printer can physically
+print to every edge; printable width and custom-media feed behavior still
+require controlled hardware validation.
+
 ## Outcome and recovery
 
 - An ATT write response confirms transport acceptance only.
@@ -143,6 +155,16 @@ a BLE release target.
 - A disconnect or write error after submission stops the queue and reports an
   uncertain partial print. Inspect the paper and logs before explicitly
   releasing or resubmitting the job.
+- The backend keeps the printer lock until its job-owned connection has been
+  disconnected and BlueZ reports it closed. If the printer is already
+  connected but not advertising, the backend recovers the exact configured
+  device from BlueZ and adopts that LE connection. Other clients may still
+  interrupt the connection.
+- Pairing, trust, and `PreferredBearer=le` remain persistent; forgetting and
+  re-trusting the printer between ordinary jobs is not expected. If teardown
+  cannot be confirmed, inspect competing clients and the BlueZ connection
+  before explicitly releasing the job. Do not replay a job after submission
+  merely because cleanup failed.
 - Cancellation stops new writes, but bytes already accepted may still print.
 
 Backend messages are sent to CUPS on stderr. They include the job identifier,

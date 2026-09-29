@@ -23,8 +23,6 @@ def managed_state(paired, bonded=True, generic=None):
                 'Paired': variant(generic),
                 'Bonded': variant(bonded),
             },
-        },
-        DEVICE_PATH + '/le': {
             'org.bluez.Bearer.LE1': {
                 'Paired': variant(paired),
                 'Bonded': variant(bonded),
