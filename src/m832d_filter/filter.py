@@ -78,7 +78,8 @@ def _transform(rows, width, height, options: Options):
 
 def convert(stream, options: Options):
     output = bytearray()
-    for page in read_pages(stream):
+    pages = read_pages(stream)
+    for page_number, page in enumerate(pages):
         rows = list(_black_rows(page, options.threshold))
         width, rows = _transform(rows, page.width, page.height, options)
         output.extend(build_setup(options.density, options.heat))
@@ -86,7 +87,8 @@ def convert(stream, options: Options):
         for start in range(0, len(rows), 65535):
             block = b"".join(rows[start:start + 65535])
             output.extend(raster_block(row_bytes, len(rows[start:start + 65535]), block))
-        output.extend(feed(options.feed))
+        if page_number + 1 < len(pages):
+            output.extend(feed(options.feed))
     output.extend(FOOTER)
     return bytes(output)
 

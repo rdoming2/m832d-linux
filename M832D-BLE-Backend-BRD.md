@@ -149,7 +149,7 @@ Queue creation, privileged installation, and changes to service configuration ar
 |---|---|
 | One-page text PDF using `w53h70` | Complete, readable page; media size and positioning agree with the USB reference. |
 | Full 53 × 70 mm image/graphics document | Complete output without the earlier short partial-print behavior; no unexplained data loss. |
-| Three-page document | Correct order and count, correct page/feed behavior, no merged or missing pages. |
+| Three-page document | Correct order and count, feed only between pages, no merged or missing pages. |
 | Five consecutive jobs | All print once without manual reconnection or repeated pairing prompts. |
 | Printer power cycle between jobs | Existing bond works, explicit LE reconnect succeeds, and the next job prints. |
 | Printer off at submission | Bounded connection handling and clear recoverable queue state; no busy loop. |

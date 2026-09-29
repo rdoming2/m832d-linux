@@ -7,7 +7,8 @@ local M832D captures and offline encoder:
    `1f 11 35 00`.
 2. One or more `GS v 0` blocks. Width is bytes per row and both width and
    height are little-endian 16-bit values.
-3. A bounded `ESC d n` feed and the existing two-command footer.
+3. A bounded `ESC d n` feed between pages, followed by the existing
+   two-command footer. The final page is not followed by the inter-page feed.
 
 The filter resolves CUPS options before constructing this stream and never
 performs USB or BLE I/O. The BLE backend therefore remains byte-transparent.

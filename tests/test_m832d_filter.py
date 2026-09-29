@@ -28,6 +28,24 @@ class FilterTests(unittest.TestCase):
         self.assertIn(b"\x1dv0\x00\x01\x00\x01\x00\x80", output)
         self.assertTrue(output.endswith(b"\x1bd\x02\x1bd\x02"))
 
+    def test_custom_page_dimensions_preserve_raster_height_without_final_feed(self):
+        # 57.15 x 79.25 mm at 300 dpi, as supplied by
+        # PageSize=Custom.57.15x79.25mm.
+        source = raster(675, 936, b"\xff" * (675 * 936))
+        output = convert(io.BytesIO(source), parse_options(""))
+        block = b"\x1dv0\x00" + struct.pack("<HH", 675 // 8 + 1, 936)
+        self.assertIn(block, output)
+        self.assertEqual(output.count(b"\x1bd"), 2)
+        self.assertTrue(output.endswith(b"\x1bd\x02\x1bd\x02"))
+
+    def test_feed_separates_pages_but_not_final_page(self):
+        page = raster(8, 1, b"\0\xff\xff\xff\xff\xff\xff\xff")
+        source = page + page[4:]
+        output = convert(io.BytesIO(source), parse_options("M832DFeed=6"))
+        self.assertEqual(output.count(b"\x1bd"), 3)
+        self.assertIn(b"\x1bd\x06\x1f\x11\x08", output)
+        self.assertTrue(output.endswith(b"\x1bd\x02\x1bd\x02"))
+
     def test_options(self):
         options = parse_options(
             "M832DDensity=Heavy M832DHeat=Slow M832DThreshold=128 "
@@ -70,6 +88,10 @@ class FilterTests(unittest.TestCase):
                 os.dup2(old_fd, 3)
                 os.close(old_fd)
 
+    def test_rejects_truncated_page(self):
+        with self.assertRaises(ValueError):
+            read_pages(io.BytesIO(raster(8, 2, b"\0")))
+
 
 def _fd_exists(fd):
     try:
@@ -77,11 +99,6 @@ def _fd_exists(fd):
     except OSError:
         return False
     return True
-
-    def test_rejects_truncated_page(self):
-        with self.assertRaises(ValueError):
-            read_pages(io.BytesIO(raster(8, 2, b"\0")))
-
 
 if __name__ == "__main__":
     unittest.main()

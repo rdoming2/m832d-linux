@@ -135,7 +135,9 @@ lp -d M832D-BLE -o PageSize=w53h70 -o fit-to-page document.pdf
 
 An A4 job produces roughly a megabyte of uncompressed raster and commands a
 much longer feed than the capture-validated 53 mm workflow. A4 is not currently
-a BLE release target.
+a BLE release target. For custom media, the filter does not append an additional
+page feed after the final raster; its configured feed is used only between
+pages.
 
 The generated PPD declares custom media, including a 2.25-inch-wide page, full
 page imageable. A4 and Letter retain their declared hardware margins. This is a

@@ -32,8 +32,9 @@ The initial BLE media target is the generated PPD's `w53h70` choice
 (approximately 53 × 70 mm). The generated PPD declares named labels and custom
 media full-page imageable, while retaining hardware margins for A4 and Letter.
 A4, Letter, other large media, final physical printable width, margins, feed
-calibration, multi-page behavior, fault recovery, and physical-completion
-detection remain outside the validated BLE scope.
+calibration, fault recovery, and physical-completion detection remain outside
+the validated BLE scope. Multi-page jobs place the configured feed only between
+pages; the final page ends with the protocol footer.
 
 ## Safety and outcome semantics
 
