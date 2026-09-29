@@ -11,7 +11,8 @@ and dbus-fast 5.0.22. Other versions are not yet validated. The backend prefers
 BlueZ `ConnectDevice`, but it can reuse a fresh LE pairing connection or connect
 an existing random-address LE device without experimental BlueZ APIs. An
 existing public-address device still requires `ConnectDevice` or a verified
-`PreferredBearer=le` setting so Classic cannot be selected silently.
+`PreferredBearer=le` setting so Classic cannot be selected silently. The print
+pipeline provisions and verifies that device property when it is available.
 
 ## Install
 
@@ -49,21 +50,23 @@ m832dble-diagnose 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0'
 The diagnostic performs a bounded LE scan and connection, resolves FF02/FF03,
 and subscribes to notifications. It does not pair, send status queries, or send
 raster data. An unpaired printer therefore reports setup required. It does not
-set `PreferredBearer`. On BlueZ versions without `ConnectDevice`, an existing
-public-address device requires an administrator to provision and verify
-`PreferredBearer=le` separately; random-address LE devices do not. Failure under
-the CUPS identity, despite success as a desktop user, indicates a bond, BlueZ
-API, or system-bus permission problem. Determine the minimum local permission
-change required before modifying policy; automatic pairing additionally
-requires permission to register an agent and call `Device1.Pair`. This package
-does not install a permissive D-Bus rule.
+set `PreferredBearer` or `Trusted`. The print pipeline does: for a public-address
+device it sets and verifies `PreferredBearer=le` before pairing or connecting,
+then sets `Trusted=true` after verifying the LE bond. Random-address LE devices
+do not need a bearer preference. Failure under the CUPS identity, despite
+success as a desktop user, indicates a bond, BlueZ API, or system-bus permission
+problem. Determine the minimum local permission change required before modifying
+policy; automatic setup requires permission to write those exact-device
+properties, register an agent, and call `Device1.Pair`. This package does not
+install a permissive D-Bus rule.
 
-The backend never sets `Trusted`, makes its agent the BlueZ default, changes
-adapter pairability/discoverability, or removes a bond. Pairing rejection,
-PIN/passkey requests, timeouts, stale keys, and permission failures hold the job
-with zero submitted bytes. Recover a stale bond by explicitly removing it with
-normal administrator BlueZ tooling, re-verifying the address, and releasing or
-resubmitting the held job; bond removal is never automatic.
+The backend never makes its agent the BlueZ default, changes adapter
+pairability/discoverability, or removes a bond. It changes only the configured
+device's `PreferredBearer` and `Trusted` properties described above. Pairing
+rejection, PIN/passkey requests, timeouts, stale keys, and permission failures
+hold the job with zero submitted bytes. Recover a stale bond by explicitly
+removing it with normal administrator BlueZ tooling, re-verifying the address,
+and releasing or resubmitting the held job; bond removal is never automatic.
 
 ## Create the separate queue
 

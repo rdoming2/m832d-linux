@@ -154,10 +154,13 @@ async def explicit_le_connect(
     try:
         newly_paired = False
         if allow_pairing:
+            if address_type == 'public':
+                await ensure_preferred_le(call)
             newly_paired = await ensure_paired(
                 bus, call, path, props, cancel_event or asyncio.Event(), pair_timeout,
                 pairing_callback,
             )
+            await ensure_trusted(call, props)
         if newly_paired:
             if await device_connected(call):
                 # Device1.Pair connected over the LE discovery path and completed
@@ -184,6 +187,11 @@ async def explicit_le_connect(
                 except SetupRequiredError:
                     raise
                 except RuntimeError as fallback:
+                    unsupported = any(marker in str(fallback) for marker in (
+                        'UnknownProperty', 'UnknownInterface', 'NotSupported',
+                    ))
+                    if not unsupported:
+                        raise
                     if address_type == 'random':
                         # A random Bluetooth address cannot identify a BR/EDR
                         # bearer, so Device1.Connect remains explicitly LE.
@@ -216,6 +224,61 @@ async def connect_device(call):
             raise
 
 
+async def ensure_preferred_le(call):
+    """Provision and verify the exact device's persistent LE preference."""
+    from dbus_fast import Variant
+
+    try:
+        reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
+            'org.bluez.Device1', 'PreferredBearer',
+        ])
+        if reply.body[0].value == 'le':
+            return False
+        await call('org.freedesktop.DBus.Properties', 'Set', 'ssv', [
+            'org.bluez.Device1', 'PreferredBearer', Variant('s', 'le'),
+        ])
+        reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
+            'org.bluez.Device1', 'PreferredBearer',
+        ])
+    except RuntimeError as exc:
+        raise SetupRequiredError(
+            f'Unable to provision PreferredBearer=le for the configured printer: {exc}'
+        ) from exc
+    if reply.body[0].value != 'le':
+        raise SetupRequiredError(
+            'BlueZ did not retain PreferredBearer=le for the configured printer'
+        )
+    return True
+
+
+async def ensure_trusted(call, discovered_props=None):
+    """Trust only the exact configured device after its LE bond is verified."""
+    from dbus_fast import Variant
+
+    discovered_props = discovered_props or {}
+    if discovered_props.get('Trusted') is True:
+        return False
+    try:
+        reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
+            'org.bluez.Device1', 'Trusted',
+        ])
+        if reply.body[0].value is True:
+            return False
+        await call('org.freedesktop.DBus.Properties', 'Set', 'ssv', [
+            'org.bluez.Device1', 'Trusted', Variant('b', True),
+        ])
+        reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
+            'org.bluez.Device1', 'Trusted',
+        ])
+    except RuntimeError as exc:
+        raise SetupRequiredError(
+            f'Unable to trust the configured printer after pairing: {exc}'
+        ) from exc
+    if reply.body[0].value is not True:
+        raise SetupRequiredError('BlueZ did not retain Trusted=true for the configured printer')
+    return True
+
+
 async def connect_with_provisioned_le(call):
     """Verify an administrator-provisioned LE preference without changing it."""
     reply = await call('org.freedesktop.DBus.Properties', 'Get', 'ss', [
@@ -225,7 +288,7 @@ async def connect_with_provisioned_le(call):
         raise SetupRequiredError(
             'BlueZ PreferredBearer must be provisioned as le before printing'
         )
-    await call('org.bluez.Device1', 'Connect')
+    await connect_device(call)
 
 
 async def _wait_or_cancel(awaitable, cancel_event, timeout, operation):

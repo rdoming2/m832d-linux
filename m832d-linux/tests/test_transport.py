@@ -8,7 +8,8 @@ from dbus_fast import MessageType
 from m832d_ble.config import DeviceConfig
 from m832d_ble.model import CancelledError, PairingRequiredError, SetupRequiredError
 from m832d_ble.transport import (
-    BleTransport, connect_with_provisioned_le, explicit_le_connect,
+    BleTransport, connect_with_provisioned_le, ensure_preferred_le,
+    ensure_trusted, explicit_le_connect,
 )
 
 
@@ -65,12 +66,20 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SetupRequiredError):
             await connect_with_provisioned_le(call)
 
+    async def test_provisioned_bearer_accepts_existing_connection(self):
+        async def call(interface, member, signature='', body=None, target=None):
+            if member == 'Get':
+                return SimpleNamespace(body=[SimpleNamespace(value='le')])
+            raise RuntimeError('org.bluez.Error.AlreadyConnected')
+
+        await connect_with_provisioned_le(call)
+
     async def test_diagnostic_connection_does_not_pair(self):
         device = SimpleNamespace(
             address='D6:4D:F2:16:B6:BF',
             details={
                 'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
-                'props': {'AddressType': 'random', 'Paired': False},
+                'props': {'AddressType': 'random', 'Paired': False, 'Trusted': True},
             },
         )
         with self.assertRaises(PairingRequiredError):
@@ -82,7 +91,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             address='D6:4D:F2:16:B6:BF',
             details={
                 'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
-                'props': {'AddressType': 'random', 'Paired': False},
+                'props': {'AddressType': 'random', 'Paired': False, 'Trusted': True},
             },
         )
 
@@ -113,7 +122,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             address='D6:4D:F2:16:B6:BF',
             details={
                 'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
-                'props': {'AddressType': 'random', 'Paired': False},
+                'props': {'AddressType': 'random', 'Paired': False, 'Trusted': True},
             },
         )
 
@@ -150,7 +159,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             address='D6:4D:F2:16:B6:BF',
             details={
                 'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
-                'props': {'AddressType': 'random', 'Paired': False},
+                'props': {'AddressType': 'random', 'Paired': False, 'Trusted': True},
             },
         )
 
@@ -188,7 +197,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             address='D6:4D:F2:16:B6:BF',
             details={
                 'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
-                'props': {'AddressType': 'random', 'Paired': True},
+                'props': {'AddressType': 'random', 'Paired': True, 'Trusted': True},
             },
         )
 
@@ -230,7 +239,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             address='A6:4D:F2:16:B6:BF',
             details={
                 'path': '/org/bluez/hci0/dev_A6_4D_F2_16_B6_BF',
-                'props': {'AddressType': 'public', 'Paired': True},
+                'props': {'AddressType': 'public', 'Paired': True, 'Trusted': True},
             },
         )
 
@@ -263,8 +272,84 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
         with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
                 patch('m832d_ble.transport.ensure_paired', new=already_paired):
-            with self.assertRaisesRegex(RuntimeError, 'public-address device'):
+            with self.assertRaisesRegex(SetupRequiredError, 'PreferredBearer=le'):
                 await explicit_le_connect(device, 'hci0', allow_pairing=True)
+
+    async def test_public_address_uses_existing_le_preference(self):
+        events = []
+        device = SimpleNamespace(
+            address='A6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_A6_4D_F2_16_B6_BF',
+                'props': {
+                    'AddressType': 'public', 'Paired': True, 'Trusted': True,
+                },
+            },
+        )
+
+        class FakeBus:
+            async def connect(self):
+                return self
+
+            async def call(self, message):
+                events.append(message.member)
+                if message.member == 'ConnectDevice':
+                    return SimpleNamespace(
+                        message_type=MessageType.ERROR,
+                        error_name='org.freedesktop.DBus.Error.UnknownMethod',
+                        body=['ConnectDevice is unavailable'],
+                    )
+                if message.member == 'Get':
+                    return SimpleNamespace(
+                        message_type=MessageType.METHOD_RETURN,
+                        body=[SimpleNamespace(value='le')],
+                    )
+                return SimpleNamespace(
+                    message_type=MessageType.METHOD_RETURN, body=[],
+                )
+
+            def disconnect(self):
+                pass
+
+        async def already_paired(*args, **kwargs):
+            return False
+
+        with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
+                patch('m832d_ble.transport.ensure_paired', new=already_paired):
+            await explicit_le_connect(device, 'hci0', allow_pairing=True)
+        self.assertEqual(events, ['Get', 'ConnectDevice', 'Get', 'Connect'])
+
+    async def test_preferred_bearer_is_set_and_verified(self):
+        calls = []
+        values = ['bredr', 'le']
+
+        async def call(interface, member, signature='', body=None, target=None):
+            calls.append((member, body))
+            if member == 'Get':
+                return SimpleNamespace(body=[SimpleNamespace(value=values.pop(0))])
+            return SimpleNamespace(body=[])
+
+        changed = await ensure_preferred_le(call)
+        self.assertTrue(changed)
+        self.assertEqual([member for member, body in calls], ['Get', 'Set', 'Get'])
+        self.assertEqual(calls[1][1][1], 'PreferredBearer')
+        self.assertEqual(calls[1][1][2].value, 'le')
+
+    async def test_trusted_is_set_and_verified(self):
+        calls = []
+        values = [False, True]
+
+        async def call(interface, member, signature='', body=None, target=None):
+            calls.append((member, body))
+            if member == 'Get':
+                return SimpleNamespace(body=[SimpleNamespace(value=values.pop(0))])
+            return SimpleNamespace(body=[])
+
+        changed = await ensure_trusted(call, {'Trusted': False})
+        self.assertTrue(changed)
+        self.assertEqual([member for member, body in calls], ['Get', 'Set', 'Get'])
+        self.assertEqual(calls[1][1][1], 'Trusted')
+        self.assertIs(calls[1][1][2].value, True)
 
 
 if __name__ == '__main__':

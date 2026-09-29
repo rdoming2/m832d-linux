@@ -104,9 +104,9 @@ automatic pairing connection is already on the selected LE discovery path and
 is reused; if it closes, BlueZ reconnects the sole new LE bond. Existing devices
 with a random address are also LE-only and can use `Device1.Connect`. An existing
 public-address device instead requires `ConnectDevice` or an
-administrator-provisioned `PreferredBearer=le`. The backend does not silently
-fall back to Classic Bluetooth, select by advertised name, or modify the BlueZ
-bearer preference.
+available `PreferredBearer` property. The print pipeline sets and verifies that
+property as `le` before pairing or connecting. It does not silently fall back to
+Classic Bluetooth or select by advertised name.
 
 ## CUPS backend and filter
 
@@ -126,16 +126,18 @@ The backend scans on the LE transport and matches the configured address. It
 uses acknowledged FF02 writes, FF03 notifications, bounded channels and waits,
 per-printer locking, and conservative retry/stop outcomes. If no LE bond exists,
 a print job makes one bounded Just Works pairing attempt for the exact configured
-device before transmitting data. Bearer configuration and any minimum D-Bus
-permission needed by the service identity must still be provisioned separately
-for an ambiguous existing public-address device.
+device before transmitting data. The service identity needs permission to set
+the exact device's bearer preference, pair it, and mark the verified bond as
+trusted.
 
-The temporary pairing agent is not made the BlueZ default, rejects callbacks
-for every other device, and does not set `Trusted`, alter adapter settings, or
-delete stale bonds. Just Works has no human confirmation and no meaningful MITM
-protection. Verify the complete printer address and adapter before creating the
-queue. Pairing rejection, PIN/passkey requirements, stale keys, or insufficient
-service permissions hold the job with zero submitted bytes instead of looping.
+The temporary pairing agent is not made the BlueZ default and rejects callbacks
+for every other device. After verifying the LE bond, the backend sets
+`Trusted=true` only for the exact configured printer. It does not alter adapter
+settings or delete stale bonds. Just Works has no human confirmation and no
+meaningful MITM protection. Verify the complete printer address and adapter
+before creating the queue. Pairing rejection, PIN/passkey requirements, stale
+keys, or insufficient service permissions hold the job with zero submitted
+bytes instead of looping.
 
 `m832dble-diagnose` performs a non-printing check of scanning, connection,
 bond/access state, FF02/FF03 capabilities, and notification subscription. It
@@ -402,8 +404,8 @@ tests depend on optional CUPS tools or system libraries.
 - Media tracking, reconnect behavior, fault injection, long jobs, multi-page
   jobs, and broad firmware compatibility require further hardware validation.
 - Existing public-address devices require BlueZ `ConnectDevice` support or an
-  administrator-provisioned `PreferredBearer=le` setting. Fresh automatic
-  pairing and random-address LE devices do not require those experimental APIs.
+  available `PreferredBearer` property that the backend can set to `le`. Fresh
+  automatic pairing and random-address LE devices do not require those APIs.
 - Classic PPD/filter workflows are deprecated in newer CUPS releases.
 - Backend queues are bounded, but the current raster filter constructs the
   converted output in memory.
