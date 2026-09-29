@@ -22,8 +22,9 @@ requirements baseline.
 
 PPDs, packet captures, logs, photos, Bluetooth addresses, and raw print payloads
 may contain private or third-party material. Keep ignored evidence out of commits
-unless the user explicitly approves it. The release must require a separately
-installed manufacturer PPD/filter until redistribution rights are established.
+unless the user explicitly approves it. Local evidence belongs under
+`research/artifacts/local/`; the release must require a separately installed
+manufacturer PPD/filter until redistribution rights are established.
 
 ## Development conventions
 

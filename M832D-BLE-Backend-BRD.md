@@ -30,7 +30,7 @@ A standalone Python sender now prints compressed and uncompressed monochrome ima
 | Filter depends on bidirectional backend interaction | Source uses CUPS back-channel reads and side-channel drain requests | Verified; exact operational expectations must be mapped during implementation |
 | Notification meanings and print completion are fully understood | Not established | Open: observed sequences must not be treated as authoritative completion/error states without validation |
 
-Reference inputs: supplied M832D.ppd; rastertoM08F.cxx from QY_Printer-2.1.0.3; iPhone print capture; Linux failure capture; standalone m832d.py; user-confirmed print results. These are engineering evidence, not approval to install or change system services.
+Reference inputs: supplied M832D.ppd; rastertoM08F.cxx from QY_Printer-2.1.0.3; iPhone print capture; Linux failure capture; standalone `m832d.py`; user-confirmed print results. Local captures, logs, images, and vendor material belong under the ignored `research/artifacts/local/` hierarchy. The small capture-derived encoder fixtures under `research/artifacts/fixtures/` support deterministic offline tests. These are engineering evidence, not approval to install or change system services.
 
 ## 4. Stakeholders and users
 
@@ -182,7 +182,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 ## 14. Open decisions
 
 1. The initial validation environment is CUPS 2.4.19, BlueZ 5.87, Python 3.14, and Bleak 3.0.2. The portable installer must check and report actual versions; broader compatibility remains to be established.
-2. Installation builds the project-owned GPLv3 filter and PPD. The manufacturer queue and artifacts remain separate reference material.
+2. Installation builds the project-owned GPLv3 filter and PPD. The manufacturer queue and local artifacts under `research/artifacts/local/` remain separate reference material.
 3. What status evidence can establish readiness and completion for this printer firmware?
 4. Which CUPS error policy best exposes partial-job uncertainty without automatic reprinting?
 5. Which additional media sizes, including A4, should be added after the `w53h70` release baseline?
