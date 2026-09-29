@@ -29,7 +29,7 @@ MediaSize "Letter"
 MediaSize "A4"
 VariablePaperSize Yes
 MinSize 0mm 0mm
-MaxSize 216.25mm 2010.83mm
+MaxSize 216mm 0mm
 
 {
   Attribute "NickName" "" "Phomemo M832D"
