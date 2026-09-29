@@ -26,13 +26,16 @@ detected installation paths. The backend package is installed into the selected
 interpreter's default `purelib` directory; `PREFIX` controls the diagnostic
 command location. `DESTDIR` applies only to files installed by this project.
 The installer does not restart CUPS, create queues, pair devices, or change
-D-Bus policy.
+D-Bus policy. Pairing can occur only when an actual BLE print job is submitted.
 
-## Pair and diagnose
+## Pairing and diagnosis
 
-Pair the selected printer interactively through the normal BlueZ tooling and
-confirm the pairing on a visible agent. Record its Bluetooth address and the
-adapter to use. Do not configure a queue by advertised name alone.
+Record and independently verify the selected printer's complete Bluetooth
+address and the adapter to use. Do not configure a queue by advertised name
+alone. If the printer has no LE bond, the first print job registers a temporary,
+non-default `NoInputNoOutput` agent and makes one bounded Just Works pairing
+attempt before sending print bytes. Just Works supplies no human confirmation
+and no meaningful MITM protection.
 
 Before creating a queue, run the non-printing diagnostic as the same service
 identity that will execute CUPS backends:
@@ -42,13 +45,22 @@ m832dble-diagnose 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0'
 ```
 
 The diagnostic performs a bounded LE scan and connection, resolves FF02/FF03,
-and subscribes to notifications. It does not send status queries or raster
-data. It does not set `PreferredBearer`; on BlueZ versions without
-`ConnectDevice`, an administrator must provision and verify
-`PreferredBearer=le` separately. Failure under the CUPS identity, despite success as a desktop user,
-indicates a bond, BlueZ API, or system-bus permission problem. Determine the
-minimum local permission change required before modifying policy; this package
-does not install a permissive D-Bus rule.
+and subscribes to notifications. It does not pair, send status queries, or send
+raster data. An unpaired printer therefore reports setup required. It does not
+set `PreferredBearer`; on BlueZ versions without `ConnectDevice`, an
+administrator must provision and verify `PreferredBearer=le` separately.
+Failure under the CUPS identity, despite success as a desktop user, indicates a
+bond, BlueZ API, or system-bus permission problem. Determine the minimum local
+permission change required before modifying policy; automatic pairing
+additionally requires permission to register an agent and call `Device1.Pair`.
+This package does not install a permissive D-Bus rule.
+
+The backend never sets `Trusted`, makes its agent the BlueZ default, changes
+adapter pairability/discoverability, or removes a bond. Pairing rejection,
+PIN/passkey requests, timeouts, stale keys, and permission failures hold the job
+with zero submitted bytes. Recover a stale bond by explicitly removing it with
+normal administrator BlueZ tooling, re-verifying the address, and releasing or
+resubmitting the held job; bond removal is never automatic.
 
 ## Create the separate queue
 
@@ -65,10 +77,10 @@ The BLE backend reports candidates in this form:
 direct m832dble://AA-BB-CC-DD-EE-FF/
 ```
 
-Verify that the address belongs to the intended paired printer; do not select a
-printer by advertised name alone. Identify the BlueZ adapter interface that the
-CUPS service must use. List adapter interfaces and controllers without changing
-their configuration:
+Verify that the address belongs to the intended physical printer; do not select
+a printer by advertised name alone. Identify the BlueZ adapter interface that
+the CUPS service must use. List adapter interfaces and controllers without
+changing their configuration:
 
 ```sh
 ls -1 /sys/class/bluetooth
@@ -126,6 +138,8 @@ a BLE release target.
   writes only.
 - Backend success does not prove that paper was physically printed.
 - A failure before the first write is safe for a later retry.
+- A pairing failure holds the job rather than repeatedly accepting pairing;
+  correct the bond or service permission problem before explicitly releasing it.
 - A disconnect or write error after submission stops the queue and reports an
   uncertain partial print. Inspect the paper and logs before explicitly
   releasing or resubmitting the job.
@@ -162,4 +176,6 @@ sudo lpadmin -x M832D-BLE
 - Printable width, media tracking, feed calibration, and physical completion
   semantics require controlled hardware validation.
 - Physical completion semantics for observed notifications are not established.
+- Automatic first-print pairing is limited to Just Works. Printers requiring a
+  PIN or passkey must be paired separately with interactive BlueZ tooling.
 - Classic PPD/filter workflows are deprecated in newer CUPS versions.

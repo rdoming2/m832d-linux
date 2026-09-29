@@ -36,7 +36,15 @@ class JobInvocation:
 
 
 class SetupRequiredError(RuntimeError):
-    """The selected device needs administrator provisioning."""
+    """The selected device needs setup before printing can continue."""
+
+
+class PairingRequiredError(SetupRequiredError):
+    """The selected device is not paired on its LE bearer."""
+
+
+class PairingFailedError(SetupRequiredError):
+    """Automatic pairing could not establish a verified LE bond."""
 
 
 class CancelledError(RuntimeError):

@@ -1,7 +1,8 @@
 """Explicit-LE BlueZ/Bleak transport for the M832D."""
 import asyncio
 
-from .model import CancelledError, SetupRequiredError
+from .model import CancelledError, PairingRequiredError, SetupRequiredError
+from .pairing import ensure_paired
 
 
 WRITE_UUID = '0000ff02-0000-1000-8000-00805f9b34fb'
@@ -9,10 +10,14 @@ NOTIFY_UUID = '0000ff03-0000-1000-8000-00805f9b34fb'
 
 
 class BleTransport:
-    def __init__(self, config, notification_callback, cancel_event=None):
+    def __init__(
+            self, config, notification_callback, cancel_event=None,
+            pairing_callback=None, allow_pairing=True):
         self.config = config
         self.notification_callback = notification_callback
         self.cancel_event = cancel_event or asyncio.Event()
+        self.pairing_callback = pairing_callback or (lambda active: None)
+        self.allow_pairing = allow_pairing
         self.client = None
         self.write_characteristic = None
         self.notify_characteristic = None
@@ -33,11 +38,15 @@ class BleTransport:
         if device is None:
             raise RuntimeError('Configured printer was not found during the bounded LE scan')
         try:
-            await explicit_le_connect(device, self.config.adapter)
+            await explicit_le_connect(
+                device, self.config.adapter, self.cancel_event,
+                self.config.connect_timeout, self.allow_pairing,
+                self.pairing_callback,
+            )
         except Exception as exc:
             if _is_authentication_error(exc):
                 raise SetupRequiredError(
-                    'LE pairing is required before unattended printing'
+                    'LE authentication failed; automatic pairing or bond recovery is required'
                 ) from exc
             raise
         self.client = BleakClient(device, timeout=self.config.connect_timeout)
@@ -49,7 +58,7 @@ class BleTransport:
         except Exception as exc:
             if _is_authentication_error(exc):
                 raise SetupRequiredError(
-                    'LE pairing is required before unattended printing'
+                    'LE authentication failed; automatic pairing or bond recovery is required'
                 ) from exc
             raise
         self.write_characteristic = self.client.services.get_characteristic(WRITE_UUID)
@@ -67,7 +76,9 @@ class BleTransport:
             )
         except Exception as exc:
             if _is_authentication_error(exc):
-                raise SetupRequiredError('LE pairing is required before unattended printing') from exc
+                raise SetupRequiredError(
+                    'LE authentication failed; automatic pairing or bond recovery is required'
+                ) from exc
             raise
 
     async def close(self):
@@ -107,7 +118,9 @@ class BleTransport:
         self.notification_callback(bytes(data))
 
 
-async def explicit_le_connect(device, configured_adapter=None):
+async def explicit_le_connect(
+        device, configured_adapter=None, cancel_event=None, pair_timeout=25.0,
+        allow_pairing=False, pairing_callback=None):
     """Use BlueZ APIs that select LE explicitly; never use a generic bearer fallback."""
     from dbus_fast import Message, MessageType, Variant, BusType
     from dbus_fast.aio import MessageBus
@@ -122,9 +135,11 @@ async def explicit_le_connect(device, configured_adapter=None):
     address_type = props.get('AddressType')
     if address_type not in ('public', 'random'):
         raise RuntimeError('BlueZ discovery did not provide an LE address type')
-    if props.get('Paired') is False:
-        raise SetupRequiredError('Configured printer is not paired on the LE bearer')
-
+    if not allow_pairing and props.get('Paired') is not True:
+        raise PairingRequiredError(
+            'Configured printer is not paired on the LE bearer; '
+            'diagnostics do not initiate pairing'
+        )
     bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
     async def call(interface, member, signature='', body=None, target=path):
@@ -137,23 +152,31 @@ async def explicit_le_connect(device, configured_adapter=None):
         return reply
 
     try:
+        if allow_pairing:
+            await ensure_paired(
+                bus, call, path, props, cancel_event or asyncio.Event(), pair_timeout,
+                pairing_callback,
+            )
         try:
             await call('org.bluez.Adapter1', 'ConnectDevice', 'a{sv}', [{
                 'Address': Variant('s', device.address),
                 'AddressType': Variant('s', address_type),
             }], target=adapter_path)
         except RuntimeError as exc:
-            if not any(marker in str(exc) for marker in ('UnknownMethod', 'NotSupported')):
+            if 'AlreadyConnected' in str(exc):
+                pass
+            elif not any(marker in str(exc) for marker in ('UnknownMethod', 'NotSupported')):
                 raise
-            try:
-                await connect_with_provisioned_le(call)
-            except SetupRequiredError:
-                raise
-            except RuntimeError as fallback:
-                raise RuntimeError(
-                    'BlueZ cannot select an LE bearer explicitly; ConnectDevice or '
-                    'PreferredBearer support is required'
-                ) from fallback
+            else:
+                try:
+                    await connect_with_provisioned_le(call)
+                except SetupRequiredError:
+                    raise
+                except RuntimeError as fallback:
+                    raise RuntimeError(
+                        'BlueZ cannot select an LE bearer explicitly; ConnectDevice or '
+                        'PreferredBearer support is required'
+                    ) from fallback
     finally:
         bus.disconnect()
 

@@ -1,7 +1,7 @@
 # Business Requirements Document: Phomemo M832D BLE Backend for Linux
 
-Version: 1.0 — Draft for review  
-Date: 2026-09-26  
+Version: 1.1 — Draft for review
+Date: 2026-09-29
 Target environment: Linux, BlueZ, CUPS, Phomemo M832D
 
 ## 1. Purpose and business outcome
@@ -35,7 +35,7 @@ Reference inputs: supplied M832D.ppd; rastertoM08F.cxx from QY_Printer-2.1.0.3; 
 ## 4. Stakeholders and users
 
 - Primary user: Linux desktop user printing documents and images from applications or scripts.
-- Administrator: installs the backend, provisions pairing, creates the queue, and diagnoses service permissions.
+- Administrator: installs the backend, verifies printer identity, creates the queue, and diagnoses service permissions and pairing failures.
 - Maintainer: supports the backend, documents protocol behavior, and manages compatibility with BlueZ, CUPS, and Python dependencies.
 
 The project owner approves scope, deployment, and release acceptance. One person may fulfill all roles.
@@ -50,7 +50,7 @@ The project owner approves scope, deployment, and release acceptance. One person
 - Unmodified project-filter output carried over USB or BLE, subject to successful compatibility testing.
 - Notification delivery to the filter through the CUPS back channel.
 - Required CUPS backend lifecycle, side-channel responses, cancellation, queue behavior, logging, and installation/removal instructions.
-- Persistent pairing provisioned interactively before unattended printing.
+- Automatic, bounded Just Works pairing of the explicitly addressed printer before the first print transmission when no LE bond exists.
 - A separately named BLE queue, with controlled end-to-end validation.
 
 ### Out of scope for the first release
@@ -66,7 +66,7 @@ The project owner approves scope, deployment, and release acceptance. One person
 
 ## 6. Required user journeys
 
-1. **Initial setup:** administrator installs dependencies, pairs the selected printer with visible confirmation, verifies BLE access, and creates a separate queue.
+1. **Initial setup:** administrator installs dependencies, verifies the selected printer's address and adapter, creates a separate queue, and ensures the CUPS execution identity has the minimum permission needed for automatic pairing and routine BLE access.
 2. **Normal printing:** user selects M832D-BLE, chooses the existing driver options, and prints without opening a terminal or confirming pairing again.
 3. **Printer unavailable:** job remains recoverable with a clear queue status; the user can power on the printer and retry without recreating the queue.
 4. **Printer fault:** paper-out, cover-open, or another supported condition is reported intelligibly and handled consistently with the vendor filter.
@@ -82,7 +82,7 @@ Priority: Must = release requirement; Should = desirable after required behavior
 | FR-01 | Must | Accept the CUPS backend invocation and job input forms required by the selected CUPS version, including file and standard-input jobs. | Integration tests exercise both input forms and required discovery/invocation behavior. |
 | FR-02 | Must | Identify the configured printer explicitly and resolve FF02 and FF03 by UUID. Numeric characteristic handles must not be hardcoded. | Logs and tests show the intended device, UUID resolution, and clear rejection when required capabilities are absent. |
 | FR-03 | Must | Establish an LE connection explicitly; no silent fallback to Classic Bluetooth. | Cold-start and reconnect tests establish LE successfully or produce an actionable error. |
-| FR-04 | Must | Support an administrator-provisioned bond for unattended jobs. Missing or invalid pairing must produce a clear setup-required outcome. | Jobs run without a desktop pairing prompt after setup; an unpaired test fails in a bounded, understandable way. |
+| FR-04 | Must | Before transmitting print data, reuse an existing LE bond or make one bounded automatic Just Works pairing attempt for the explicitly configured device. Pairing rejection, unsupported PIN/passkey methods, invalid bonds, and permission failures must produce a clear setup-required outcome without repeated attempts. | Offline tests verify exact-device agent filtering, timeout/cancellation cleanup, bond verification, and zero submitted bytes on failure; approved hardware testing confirms first-print enrollment. |
 | FR-05 | Must | Forward vendor filter output in order without unintended insertion, removal, or modification of bytes. | A recording transport verifies byte-for-byte equivalence, including multiple pages and binary payloads. |
 | FR-06 | Must | Use the validated acknowledged-write configuration as the initial transport policy, with chunks up to 182 bytes subject to actual connection/API constraints. | Tests verify response-enabled writes, ordering, limits, and failure reporting. |
 | FR-07 | Must | Deliver printer notifications to the CUPS back channel in order, using the representation expected by the filter. | Filter queries receive their replies; split/coalesced delivery is tested against the filter parser. |
@@ -109,7 +109,7 @@ Successful CUPS delivery and confirmed physical print completion must be disting
 
 - **Reliability:** no interleaving, silent byte loss, unlimited retry loops, or indefinite side-channel waits.
 - **Performance:** baseline the tested full-page workload and record rendering, connection, upload, and completion-observation times separately. Numeric service targets will be agreed after this baseline; current small-image timings do not establish full-page performance.
-- **Security:** restrict connections to the configured device; preserve explicit pairing approval; do not log keys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
+- **Security:** restrict scanning, pairing-agent callbacks, and connections to the configured device and LE bearer. Automatic Just Works enrollment has no human confirmation or meaningful MITM protection, so administrators must verify the complete address before queue creation. Do not log keys, passkeys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
 - **Maintainability:** separate CUPS adaptation, BLE transport, and status policy; document version assumptions and protocol evidence. Runtime changes must have a clear rollback path.
 - **Observability:** log job identifier, stage, bytes submitted/acknowledged, transport configuration, elapsed time, and actionable errors. Detailed notification logging is opt-in or appropriately bounded.
 - **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Identify required experimental BlueZ APIs and provide clear errors when absent.
@@ -158,6 +158,7 @@ Queue creation, privileged installation, and changes to service configuration ar
 | Cancellation during upload | Backend ceases new submissions and releases resources; already transmitted data is acknowledged as potentially printable. |
 | Concurrent jobs | No interleaved printer data; documented serialization or busy handling. |
 | CUPS service execution | Backend accesses the bonded printer without a logged-in terminal agent for routine jobs. |
+| First print to an unpaired printer | One bounded exact-device Just Works pairing attempt completes before any FF02 write, or the job is held with zero submitted bytes and an actionable setup error. |
 | Side/back-channel behavior | Vendor filter completes required queries and drain requests without deadlock or fabricated status. |
 | Remove BLE integration | USB queue and unrelated Bluetooth devices remain operational. |
 
@@ -174,6 +175,8 @@ Record software versions, printer firmware if obtainable, document identity, opt
 | Unknown completion semantics | False success or duplicate retries | Separate delivery from physical completion; conservative retry policy and explicit release limitation if needed. |
 | Filter licensing/build dependencies | Distribution or installation blocked | GPLv3 project licensing, upstream attribution, and no manufacturer artifacts. |
 | Multiple clients, including phone app | Connection contention | Per-printer lock, clear busy reporting, and documented exclusive-use expectations. |
+| Silent Just Works enrollment authenticates no human-visible identity | A nearby impersonating device using the configured address could be bonded | Require verification of the complete address and adapter before queue creation; never select by name or accept callbacks for another object path. |
+| CUPS identity lacks pairing-agent permission | First print is held before transmission | Report setup-required, avoid repeated pairing attempts, and require a separately approved minimum-permission deployment change. |
 
 ## 14. Open decisions
 

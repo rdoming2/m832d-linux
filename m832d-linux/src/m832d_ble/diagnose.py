@@ -8,7 +8,7 @@ from .transport import BleTransport
 
 async def diagnose(config):
     notifications = []
-    transport = BleTransport(config, notifications.append)
+    transport = BleTransport(config, notifications.append, allow_pairing=False)
     try:
         await transport.connect()
         print(f'OK device: {config.address}')

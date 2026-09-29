@@ -57,13 +57,27 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
     transport = None
     source = None
     connecting = False
+    pairing = False
+
+    def pairing_status(active):
+        nonlocal pairing
+        pairing = active
+        if active:
+            info(f'job {invocation.job_id}: configured printer is unpaired; pairing automatically')
+            state(add='authentication-required')
+        else:
+            state(remove='authentication-required')
+
     try:
         source = open(invocation.filename, 'rb') if invocation.filename else sys.stdin.buffer
         with PrinterLock(config.lock_key):
             info(f'job {invocation.job_id}: connecting to configured LE printer')
             state(add='connecting-to-device')
             connecting = True
-            transport = transport_factory(config, lambda data: runtime.notification(data), cancel_event)
+            transport = transport_factory(
+                config, lambda data: runtime.notification(data), cancel_event,
+                pairing_status,
+            )
             runtime = BackendRuntime(transport, channels, source, cancel_event)
             connect_task = asyncio.create_task(transport.connect())
             cancel_task = asyncio.create_task(cancel_event.wait())
@@ -122,6 +136,8 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
     finally:
         if connecting:
             state(remove='connecting-to-device')
+        if pairing:
+            state(remove='authentication-required')
         if transport is not None:
             try:
                 await transport.close()

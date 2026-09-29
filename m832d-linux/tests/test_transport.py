@@ -1,10 +1,15 @@
 import asyncio
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
+
+from dbus_fast import MessageType
 
 from m832d_ble.config import DeviceConfig
-from m832d_ble.model import CancelledError, SetupRequiredError
-from m832d_ble.transport import BleTransport, connect_with_provisioned_le
+from m832d_ble.model import CancelledError, PairingRequiredError, SetupRequiredError
+from m832d_ble.transport import (
+    BleTransport, connect_with_provisioned_le, explicit_le_connect,
+)
 
 
 class FakeClient:
@@ -59,6 +64,48 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(SetupRequiredError):
             await connect_with_provisioned_le(call)
+
+    async def test_diagnostic_connection_does_not_pair(self):
+        device = SimpleNamespace(
+            address='D6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
+                'props': {'AddressType': 'random', 'Paired': False},
+            },
+        )
+        with self.assertRaises(PairingRequiredError):
+            await explicit_le_connect(device, 'hci0', allow_pairing=False)
+
+    async def test_pairing_precedes_explicit_le_connection(self):
+        events = []
+        device = SimpleNamespace(
+            address='D6:4D:F2:16:B6:BF',
+            details={
+                'path': '/org/bluez/hci0/dev_D6_4D_F2_16_B6_BF',
+                'props': {'AddressType': 'random', 'Paired': False},
+            },
+        )
+
+        class FakeBus:
+            async def connect(self):
+                return self
+
+            async def call(self, message):
+                events.append(message.member)
+                return SimpleNamespace(
+                    message_type=MessageType.METHOD_RETURN, body=[],
+                )
+
+            def disconnect(self):
+                pass
+
+        async def fake_pair(*args, **kwargs):
+            events.append('PairBeforeConnect')
+
+        with patch('dbus_fast.aio.MessageBus', return_value=FakeBus()), \
+                patch('m832d_ble.transport.ensure_paired', new=fake_pair):
+            await explicit_le_connect(device, 'hci0', allow_pairing=True)
+        self.assertLess(events.index('PairBeforeConnect'), events.index('ConnectDevice'))
 
 
 if __name__ == '__main__':

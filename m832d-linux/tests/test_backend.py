@@ -16,10 +16,11 @@ class RecordingTransport:
     failure = None
     last_instance = None
 
-    def __init__(self, config, callback, cancel_event):
+    def __init__(self, config, callback, cancel_event, pairing_callback=None):
         self.config = config
         self.callback = callback
         self.cancel_event = cancel_event
+        self.pairing_callback = pairing_callback or (lambda active: None)
         self.submitted_bytes = 0
         self.acknowledged_bytes = 0
         self.closed = False
@@ -27,6 +28,9 @@ class RecordingTransport:
         RecordingTransport.last_instance = self
 
     async def connect(self):
+        if self.failure == 'pairing':
+            self.pairing_callback(True)
+            self.pairing_callback(False)
         if self.failure == 'connect':
             raise RuntimeError('injected connection failure')
         if self.failure == 'setup':
@@ -86,6 +90,16 @@ class BackendOutcomeTests(unittest.IsolatedAsyncioTestCase):
             self.invocation, self.config, FakeChannels(), RecordingTransport,
         )
         self.assertEqual(result, BackendExit.HOLD)
+        self.assertEqual(RecordingTransport.last_instance.submitted_bytes, 0)
+        self.assertEqual(bytes(RecordingTransport.last_instance.data), b'')
+
+    async def test_pairing_completes_before_data_is_read(self):
+        RecordingTransport.failure = 'pairing'
+        result = await run_job(
+            self.invocation, self.config, FakeChannels(), RecordingTransport,
+        )
+        self.assertEqual(result, BackendExit.OK)
+        self.assertEqual(bytes(RecordingTransport.last_instance.data), b'binary\x00job')
 
     async def test_failure_after_submission_stops_queue(self):
         RecordingTransport.failure = 'write'

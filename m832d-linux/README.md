@@ -22,9 +22,10 @@ physical-completion detection remain outside the validated BLE scope.
 ## Safety and outcome semantics
 
 Hardware tests must be deliberate. Installation and offline tests do not
-contact the printer. Preserve existing manufacturer drivers and USB queues, and
-do not implicitly change pairing, BlueZ preferences, D-Bus policy, CUPS queues,
-or system services.
+contact the printer. A submitted BLE print job may create a bond automatically
+before sending print data; installation does not. Preserve existing manufacturer
+drivers and USB queues, and do not implicitly change BlueZ preferences, D-Bus
+policy, CUPS queues, or system services.
 
 Never automatically retry after print data may have reached the printer. A
 failure after submission can represent an uncertain partial print; replaying it
@@ -120,13 +121,22 @@ m832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0
 
 The backend scans on the LE transport and matches the configured address. It
 uses acknowledged FF02 writes, FF03 notifications, bounded channels and waits,
-per-printer locking, and conservative retry/stop outcomes. Pairing and bearer
-configuration must be provisioned separately and verified under the service
-identity that runs the backend.
+per-printer locking, and conservative retry/stop outcomes. If no LE bond exists,
+a print job makes one bounded Just Works pairing attempt for the exact configured
+device before transmitting data. Bearer configuration and any minimum D-Bus
+permission needed by the service identity must still be provisioned separately.
+
+The temporary pairing agent is not made the BlueZ default, rejects callbacks
+for every other device, and does not set `Trusted`, alter adapter settings, or
+delete stale bonds. Just Works has no human confirmation and no meaningful MITM
+protection. Verify the complete printer address and adapter before creating the
+queue. Pairing rejection, PIN/passkey requirements, stale keys, or insufficient
+service permissions hold the job with zero submitted bytes instead of looping.
 
 `m832dble-diagnose` performs a non-printing check of scanning, connection,
 bond/access state, FF02/FF03 capabilities, and notification subscription. It
-does not send status queries or raster data.
+does not pair, send status queries, or send raster data; an unpaired printer is
+reported as requiring setup.
 
 Use a separately named BLE queue with `PageSize=w53h70` and
 `printer-error-policy=stop-printer`. Do not replace or modify an existing USB
@@ -292,9 +302,8 @@ hardware test.
 
 ### BLE queue
 
-Pair the intended printer using normal BlueZ tooling before queue creation.
 After the backend is installed, BLE discovery through CUPS reports candidate
-device URIs:
+device URIs. Discovery does not pair the printer:
 
 ```sh
 lpinfo -v
@@ -306,10 +315,11 @@ The backend reports an explicit address in a URI resembling:
 direct m832dble://AA-BB-CC-DD-EE-FF/
 ```
 
-Verify that the address belongs to the intended, paired physical printer; do
-not select it by advertised name alone. Identify the BlueZ adapter interface
-that CUPS must use. Adapter interfaces are normally named `hci0`, `hci1`, and
-so on, and can be listed without changing configuration:
+Verify that the address belongs to the intended physical printer; do not select
+it by advertised name alone. The first print will silently accept Just Works
+pairing for that exact address if it is not already bonded. Identify the BlueZ
+adapter interface that CUPS must use. Adapter interfaces are normally named
+`hci0`, `hci1`, and so on, and can be listed without changing configuration:
 
 ```sh
 ls -1 /sys/class/bluetooth
@@ -325,7 +335,8 @@ adding the verified adapter after the slash:
 m832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0
 ```
 
-Use the non-printing diagnostic before creating the queue:
+Use the non-printing diagnostic to verify an existing bond and service access.
+It deliberately does not create a missing bond:
 
 ```sh
 m832dble-diagnose 'm832dble://AA-BB-CC-DD-EE-FF/?adapter=hci0'
