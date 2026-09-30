@@ -48,6 +48,10 @@ MaxSize 216mm 0mm
   *Choice "160/160" ""
   Choice "128/128" ""
   Choice "192/192" ""
+  Option "M832DRendering/Grayscale rendering" PickOne AnySetup 10
+  *Choice "Atkinson/Atkinson" ""
+  Choice "FloydSteinberg/Floyd-Steinberg" ""
+  Choice "Threshold/Binary threshold" ""
   Option "M832DFeed/Feed" PickOne DocumentSetup 10
   *Choice "2/2" ""
   Choice "6/6" ""

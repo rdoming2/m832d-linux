@@ -8,6 +8,7 @@ import time
 from m832d_protocol import FOOTER, build_setup, feed, raster_block
 
 from .cups_raster import Page, read_pages
+from .dither import render
 from .options import Options, parse_options
 from .side_channel import CupsSideChannel
 
@@ -17,29 +18,39 @@ USB_SETTLE_MM_PER_SECOND = 8.0
 USB_SETTLE_MAX_SECONDS = 60.0
 
 
-def _black_rows(page: Page, threshold: int):
+def _luminance_rows(page: Page):
+    if page.bits_per_pixel not in (8, 24, 32):
+        raise ValueError("only 1-bit, grayscale, RGB, and RGBA raster is supported")
+    bytes_pixel = page.bits_per_pixel // 8
+    luminance = []
+    for offset in range(0, len(page.pixels), page.bytes_per_line):
+        source = page.pixels[offset:offset + page.bytes_per_line]
+        row = []
+        for x in range(page.width):
+            pixel = source[x * bytes_pixel:x * bytes_pixel + bytes_pixel]
+            if len(pixel) < bytes_pixel:
+                raise ValueError("truncated raster row")
+            if bytes_pixel == 1:
+                row.append(pixel[0])
+            else:
+                row.append((299 * pixel[0] + 587 * pixel[1]
+                            + 114 * pixel[2]) // 1000)
+        luminance.append(row)
+    return luminance
+
+
+def _black_rows(page: Page, threshold: int, rendering="atkinson"):
     if page.bits_per_pixel == 1:
         for source in (page.pixels[i:i + page.bytes_per_line]
                        for i in range(0, len(page.pixels), page.bytes_per_line)):
             # CUPS monochrome convention is one for black.
             yield source[:(page.width + 7) // 8]
         return
-    channels = max(1, page.num_colors)
-    if page.bits_per_pixel not in (8, 24, 32):
-        raise ValueError("only 1-bit, grayscale, RGB, and RGBA raster is supported")
-    bytes_pixel = page.bits_per_pixel // 8
-    for offset in range(0, len(page.pixels), page.bytes_per_line):
-        source = page.pixels[offset:offset + page.bytes_per_line]
+    rows = render(_luminance_rows(page), rendering, threshold)
+    for source in rows:
         output = bytearray((page.width + 7) // 8)
-        for x in range(page.width):
-            pixel = source[x * bytes_pixel:x * bytes_pixel + bytes_pixel]
-            if len(pixel) < bytes_pixel:
-                raise ValueError("truncated raster row")
-            if bytes_pixel == 1:
-                value = pixel[0]
-            else:
-                value = (299 * pixel[0] + 587 * pixel[1] + 114 * pixel[2]) // 1000
-            if value < threshold:
+        for x, black in enumerate(source):
+            if black:
                 output[x // 8] |= 0x80 >> (x % 8)
         yield bytes(output)
 
@@ -83,7 +94,7 @@ def _transform(rows, width, height, options: Options):
 
 
 def _page_output(page: Page, options: Options, has_next):
-    rows = list(_black_rows(page, options.threshold))
+    rows = list(_black_rows(page, options.threshold, options.rendering))
     width, rows = _transform(rows, page.width, page.height, options)
     output = bytearray(build_setup(options.density, options.heat))
     row_bytes = (width + 7) // 8

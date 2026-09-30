@@ -46,7 +46,11 @@ sudo lpadmin -p M832D-USB -E \
   -o printer-error-policy=stop-printer
 ```
 
-The shared filter supports `M832DPagePause=5`, `10`, `20`, or `30` seconds for
+The shared filter supports `M832DRendering=Atkinson` (the default),
+`FloydSteinberg`, and `Threshold` for monochrome rendering. Atkinson and
+Floyd–Steinberg use a fixed midpoint of 128; threshold mode uses
+`M832DThreshold` (default 160). It also supports `M832DPagePause=5`, `10`,
+`20`, or `30` seconds for
 manual tear-off between pages; the default is `Off`. For a paused job, each
 page receives the captured footer instead of an additional normal inter-page
 feed before a bounded output drain. Because the printer continues physically

@@ -131,6 +131,21 @@ property as `le` before pairing or connecting.
 
 ## CUPS backend and filter
 
+The maintained CUPS filter requests an 8-bit grayscale raster and converts it
+to the printer's monochrome output. `M832DRendering=Atkinson` is the default;
+`FloydSteinberg` and `Threshold` are also available. The two dithering modes
+use a fixed midpoint of 128, while `Threshold` uses `M832DThreshold` (160 by
+default) for the legacy binary cutoff. Select a mode per job, for example:
+
+```sh
+lp -d M832D-BLE -o M832DRendering=FloydSteinberg document.pdf
+lp -d M832D-BLE -o M832DRendering=Threshold -o M832DThreshold=128 document.pdf
+```
+
+The physical printer remains monochrome; grayscale refers to the source raster
+and its halftone rendering. The historical standalone encoder remains a
+threshold-only utility.
+
 On the tested setup, text printed with the project `rastertom832d` filter
 appeared sharper than text produced by the manufacturer-supplied
 `rastertoM08F` filter. In general, artifacts are reduced significantly.

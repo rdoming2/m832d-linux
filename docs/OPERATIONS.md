@@ -155,6 +155,13 @@ inter-page feed as well, then waits for a bounded output drain before starting
 the timer. The drain fences host-side transport only; it and the elapsed pause
 do not confirm that the page has physically finished printing.
 
+For grayscale documents, the filter defaults to Atkinson halftoning. Select
+`M832DRendering=FloydSteinberg` for Floyd–Steinberg diffusion, or select
+`M832DRendering=Threshold` to use the legacy binary cutoff. Atkinson and
+Floyd–Steinberg use a fixed midpoint of 128; threshold mode uses
+`M832DThreshold`, which defaults to 160. These options affect raster rendering
+only and do not alter transport or printer completion semantics.
+
 The generated PPD declares custom media, including a 2.25-inch-wide page, full
 page imageable. A4 and Letter retain their declared hardware margins. The
 2.25-inch width has been physically tested over USB and BLE, but this is not

@@ -121,6 +121,13 @@ Proposed pipeline:
 
 Linux application → CUPS document conversion → rastertom832d + M832D PPD → USB or BLE backend → M832D
 
+The CUPS filter requests 8-bit grayscale input and renders it to the printer's
+monochrome raster. Atkinson is the default renderer, with Floyd–Steinberg and
+legacy threshold rendering available as explicit `M832DRendering` choices.
+Both error-diffusion modes use a fixed midpoint of 128; threshold rendering
+uses the configurable `M832DThreshold` cutoff. This rendering choice does not
+change the byte-preserving USB/BLE transport contract.
+
 Return path:
 
 M832D notifications → BLE backend → CUPS back channel

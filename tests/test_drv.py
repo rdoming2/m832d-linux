@@ -20,6 +20,12 @@ class DriverTests(unittest.TestCase):
             text = ppd.read_text()
             self.assertIn("rastertom832d", text)
             self.assertIn("M832DPagePause", text)
+            self.assertIn("M832DRendering", text)
+            self.assertIn("*DefaultM832DRendering: Atkinson", text)
+            for value, label in (("Atkinson", "Atkinson"),
+                                 ("FloydSteinberg", "Floyd-Steinberg"),
+                                 ("Threshold", "Binary threshold")):
+                self.assertIn(f"*M832DRendering {value}/{label}", text)
             self.assertIn("*DefaultM832DPagePause: 0", text)
             for value, label in (("0", "Off"), ("5", "5 seconds"),
                                  ("10", "10 seconds"), ("20", "20 seconds"),

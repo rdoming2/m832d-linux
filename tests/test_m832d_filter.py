@@ -3,9 +3,9 @@ import os
 import struct
 import unittest
 
-from m832d_filter.cups_raster import read_pages
+from m832d_filter.cups_raster import Page, read_pages
 from m832d_filter.filter import (
-    _ble_ready, _usb_pause_seconds, _write_output, convert,
+    _black_rows, _ble_ready, _usb_pause_seconds, _write_output, convert,
 )
 from m832d_filter.options import parse_options
 from m832d_filter.side_channel import CupsSideChannel
@@ -52,9 +52,30 @@ class FilterTests(unittest.TestCase):
     def test_options(self):
         options = parse_options(
             "M832DDensity=Heavy M832DHeat=Slow M832DThreshold=128 "
-            "M832DRotation=90")
+            "M832DRotation=90 M832DRendering=FloydSteinberg")
         self.assertEqual((options.density, options.heat, options.threshold,
-                          options.rotation), (4, 0x20, 128, 90))
+                          options.rotation, options.rendering),
+                         (4, 0x20, 128, 90, "floyd-steinberg"))
+
+    def test_default_rendering_is_atkinson(self):
+        self.assertEqual(parse_options("").rendering, "atkinson")
+        source = raster(8, 1, b"\x80" * 8)
+        output = convert(io.BytesIO(source), parse_options(""))
+        self.assertIn(b"\x33", output)
+
+    def test_rendering_option_rejects_unknown_value(self):
+        with self.assertRaises(ValueError):
+            parse_options("M832DRendering=Ordered")
+
+    def test_threshold_mode_preserves_configured_cutoff(self):
+        page = Page(4, 1, 8, 8, 4, 0, 1, bytes((127, 128, 159, 160)),
+                    "", 1, 0, ())
+        self.assertEqual(list(_black_rows(page, 160, "threshold")),
+                         [b"\xe0"])
+
+    def test_one_bit_input_bypasses_rendering(self):
+        page = Page(4, 1, 1, 1, 1, 0, 1, b"\xa0", "", 1, 0, ())
+        self.assertEqual(list(_black_rows(page, 0, "atkinson")), [b"\xa0"])
 
     def test_page_pause_options_are_bounded(self):
         self.assertEqual(parse_options("M832DPagePause=20").page_pause, 20)
