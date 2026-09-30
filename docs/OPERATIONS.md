@@ -125,9 +125,11 @@ lpstat -v M832D-BLE
 lpoptions -p M832D-BLE -l
 ```
 
-The generated PPD defaults to `w53h70`, which is the initial BLE validation
-target. Select `w53h70` explicitly when an application supplies its own media
-setting. For a controlled test:
+The generated PPD defaults to `w53h70` (approximately 53 × 70 mm). Physical
+printing has also been successfully tested over both USB and BLE with
+`w110h146` (approximately 110 × 146 mm) and with a custom 2.25 in (57.15 mm)
+width. Select `w53h70` explicitly when an application supplies its own media
+setting. For a controlled default-size test:
 
 ```sh
 lp -d M832D-BLE -o PageSize=w53h70 -o fit-to-page document.pdf
@@ -140,10 +142,10 @@ page feed after the final raster; its configured feed is used only between
 pages.
 
 The generated PPD declares custom media, including a 2.25-inch-wide page, full
-page imageable. A4 and Letter retain their declared hardware margins. This is a
-CUPS imageable-area setting, not confirmation that the printer can physically
-print to every edge; printable width and custom-media feed behavior still
-require controlled hardware validation.
+page imageable. A4 and Letter retain their declared hardware margins. The
+2.25-inch width has been physically tested over USB and BLE, but this is not
+confirmation of full edge-to-edge output, arbitrary custom heights, maximum
+printable width, or custom-media feed behavior.
 
 ## Outcome and recovery
 
@@ -197,8 +199,10 @@ sudo lpadmin -x M832D-BLE
 - The project filter emits uncompressed raster and currently uses only the
   confirmed command family; vendor status semantics still require hardware
   validation.
-- Printable width, media tracking, feed calibration, and physical completion
-  semantics require controlled hardware validation.
+- Maximum printable width, edge behavior, media tracking, feed calibration, and
+  physical completion semantics require additional controlled hardware
+  validation. Selected 53 mm, 110 mm, and 57.15 mm-width configurations have
+  already been tested over USB and BLE.
 - Physical completion semantics for observed notifications are not established.
 - Automatic first-print pairing is limited to Just Works. Printers requiring a
   PIN or passkey must be paired separately with interactive BlueZ tooling.

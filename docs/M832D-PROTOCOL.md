@@ -13,7 +13,9 @@ local M832D captures and offline encoder:
 The filter resolves CUPS options before constructing this stream and never
 performs USB or BLE I/O. The BLE backend therefore remains byte-transparent.
 
-The M832D's final printable width, vendor status semantics, media tracking,
-and physical completion indication remain hardware-validation items. Numeric
-ATT handles are never part of this contract; BLE characteristics are resolved
-by UUID.
+Successful physical output has been tested over USB and BLE at 53 mm, 110 mm,
+and a custom 57.15 mm width. The M832D's maximum physical printable width,
+edge behavior, custom-media feed behavior, vendor status semantics, media
+tracking, and physical completion indication remain hardware-validation items.
+Numeric ATT handles are never part of this contract; BLE characteristics are
+resolved by UUID.

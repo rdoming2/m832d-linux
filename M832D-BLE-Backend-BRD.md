@@ -1,14 +1,14 @@
 # Business Requirements Document: Phomemo M832D BLE Backend for Linux
 
-Version: 1.3 — Draft for review
+Version: 1.4 — Functional implementation baseline
 Date: 2026-09-29
 Target environment: Linux, BlueZ, CUPS, Phomemo M832D
 
 ## 1. Purpose and business outcome
 
-Enable users to print ordinary documents wirelessly to the Phomemo M832D from Linux applications through CUPS. Reuse the existing model-specific PPD and raster filter so users retain the established document rendering, media selection, and print settings of their USB workflow.
+Enable users to print ordinary documents wirelessly to the Phomemo M832D from Linux applications through CUPS. The project provides a project-owned generated PPD, raster filter, and separately installable BLE backend so users retain consistent document rendering and media selection across dedicated USB and BLE queues.
 
-The deliverable is a separately installable BLE backend and a dedicated M832D-BLE queue. The existing USB queue must remain usable. Production readiness requires more than successful byte transmission: jobs must have understandable outcomes, controlled recovery, and predictable behavior across reconnects and printer faults.
+The maintained deliverable is a separately installable driver/filter/backend set and a dedicated M832D-BLE queue. The existing USB queue must remain usable. The implementation is functional and maturing.
 
 ## 2. Problem statement
 
@@ -23,14 +23,14 @@ A standalone Python sender now prints compressed and uncompressed monochrome ima
 | Explicit LE establishment solves the observed Classic connection failure | User-tested connection through BlueZ ConnectDevice | Verified on the current setup; reconnect and version coverage remain limited |
 | Notification subscription requires authentication on the tested printer | HCI capture shows descriptor write rejected with Insufficient Authentication, followed by pairing confirmation timeout | Verified; visible pairing agent subsequently resolved the failure |
 | Acknowledged writes with chunks up to 182 bytes and no added delay print small and larger images | User-confirmed physical prints | Verified configuration; acknowledgment and chunk size changed together, so the independent cause of the earlier failure is not established |
+| CUPS printing succeeds with tested media widths | User-confirmed physical prints over USB and BLE at 53 mm, 110 mm, and custom 2.25 in (57.15 mm) width | Verified on the tested setup; custom result records width only, and broader media, firmware, and reliability coverage remain limited |
 | Uncompressed raster jobs print over BLE | User-confirmed test | Verified for standalone sender jobs, not the complete CUPS filter sequence |
 | Captured compressed jobs decode to Test and Best | LZO decoding and rendered images | Verified; 576 × 164 images, three compressed blocks per job |
-| The supplied PPD identifies model 77832, 300 dpi, default A4, and rastertoM08F | PPD inspection | Verified for supplied PPD |
-| The filter's M832 branch uses uncompressed raster output | Source inspection: compression-off command and GS v 0 raster header | Verified in supplied source; execution of the complete BLE pipeline is pending |
+| The filter's M832 branch uses uncompressed raster output | Source inspection: compression-off command and GS v 0 raster header | Verified in supplied source and exercised by the tested CUPS configurations |
 | Filter depends on bidirectional backend interaction | Source uses CUPS back-channel reads and side-channel drain requests | Verified; exact operational expectations must be mapped during implementation |
 | Notification meanings and print completion are fully understood | Not established | Open: observed sequences must not be treated as authoritative completion/error states without validation |
 
-Reference inputs: supplied M832D.ppd; rastertoM08F.cxx from QY_Printer-2.1.0.3; iPhone print capture; Linux failure capture; standalone `m832d.py`; user-confirmed print results. Local captures, logs, images, and vendor material belong under the ignored `research/artifacts/local/` hierarchy. The small capture-derived encoder fixtures under `research/artifacts/fixtures/` support deterministic offline tests. These are engineering evidence, not approval to install or change system services.
+Reference inputs: iPhone print capture; Linux failure capture; standalone `m832d.py`; user-confirmed print results. Local captures, logs, images, and vendor material belong under the ignored `research/artifacts/local/` hierarchy. The small capture-derived encoder fixtures under `research/artifacts/fixtures/` support deterministic offline tests. These are engineering evidence, not approval to install or change system services.
 
 ## 4. Stakeholders and users
 
@@ -45,7 +45,7 @@ The project owner approves scope, deployment, and release acceptance. One person
 ### In scope for the first release
 
 - One M832D printer on the existing Linux/BlueZ host, with explicit printer identity and adapter selection where needed.
-- Initial media validation uses the PPD's `w53h70` choice (approximately 53 × 70 mm), matching the capture-tested workflow.
+- The PPD's `w53h70` choice (approximately 53 × 70 mm) remains the default; physical tests also cover `w110h146` (approximately 110 × 146 mm) and a custom 2.25 in (57.15 mm) width over USB and BLE.
 - Project-owned GPLv3 raster filter and generated M832D PPD.
 - Unmodified project-filter output carried over USB or BLE, subject to successful compatibility testing.
 - Notification delivery to the filter through the CUPS back channel.
@@ -62,7 +62,6 @@ The project owner approves scope, deployment, and release acceptance. One person
 - Guaranteed exactly-once physical printing across loss of connection or power.
 - Automatic printer firmware updates, system-wide Bluetooth mode changes, or removal of the USB queue.
 - Broad CUPS-version support beyond the documented, tested host configuration.
-- A4 over BLE until its substantially larger uncompressed stream, feed behavior, and physical output are separately approved.
 
 ## 6. Required user journeys
 
@@ -129,7 +128,7 @@ The backend must also service CUPS side-channel requests while transmitting and 
 
 Initial transport settings are acknowledged writes, no artificial inter-write delay, and a maximum requested chunk size of 182 bytes. These settings are a tested starting point, not universal printer limits. The vendor output must not pass through the standalone sender's fixed SETUP/FOOTER validator or have the mobile-app setup prepended automatically.
 
-The PPD specifies 300 dpi and ships with an A4 default, but the initial BLE queue must override it with `w53h70`. Named labels and custom media are declared full-page imageable; A4 and Letter retain their hardware margins. This declares the CUPS imageable area only and does not establish physical full bleed or printable width. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
+The historical manufacturer PPD specified an A4 default; the project-generated PPD defaults to `w53h70`. Successful CUPS testing covers `w53h70`, `w110h146`, and a custom 2.25 in (57.15 mm) width over USB and BLE. Named labels and custom media are declared full-page imageable; A4 and Letter retain their hardware margins. This declares the CUPS imageable area only and does not establish physical full bleed, maximum printable width, or arbitrary custom-media behavior. The standalone encoder's 576-pixel canvas must not limit CUPS output; the vendor filter emits dimensions derived from the selected CUPS raster. A4 pages are substantially larger and require independent validation. Page boundaries, media settings, copies, and feed behavior remain owned by the existing CUPS/filter pipeline.
 
 ## 11. Delivery phases and gates
 
@@ -149,6 +148,8 @@ Queue creation, privileged installation, and changes to service configuration ar
 |---|---|
 | One-page text PDF using `w53h70` | Complete, readable page; media size and positioning agree with the USB reference. |
 | Full 53 × 70 mm image/graphics document | Complete output without the earlier short partial-print behavior; no unexplained data loss. |
+| Full 110 × 146 mm image/graphics document | Successful physical output over the tested USB and BLE paths; broader long-job and firmware coverage remains pending. |
+| Custom 2.25 in (57.15 mm) width | Successful physical output over the tested USB and BLE paths; custom height and edge behavior remain pending. |
 | Three-page document | Correct order and count, feed only between pages, no merged or missing pages. |
 | Five consecutive jobs | All print once without manual reconnection or repeated pairing prompts. |
 | Printer power cycle between jobs | Existing bond works, explicit LE reconnect succeeds, and the next job prints. |
@@ -185,7 +186,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 2. Installation builds the project-owned GPLv3 filter and PPD. The manufacturer queue and local artifacts under `research/artifacts/local/` remain separate reference material.
 3. What status evidence can establish readiness and completion for this printer firmware?
 4. Which CUPS error policy best exposes partial-job uncertainty without automatic reprinting?
-5. Which additional media sizes, including A4, should be added after the `w53h70` release baseline?
+5. Which additional media sizes, including 80 mm and A4, should be added after the validated `w53h70` and `w110h146` configurations?
 6. What full-page throughput is acceptable once measured on the current adapter?
 7. Does the filter parser tolerate notification fragmentation/coalescing as delivered by the back channel?
 
@@ -202,7 +203,7 @@ Source inspection established these requirements for the M832 branch:
 - The filter's status parser assumes complete records and has competing monitor and synchronous readers. Fragmented/coalesced notification behavior and the possible reader race require harness and hardware validation.
 - The M832 output is an uncompressed `GS v 0` raster stream. The BLE backend must not LZO-compress, validate as a mobile-image envelope, or otherwise modify it.
 
-The first implementation will be a Python backend using Bleak and `dbus-fast`, with typed libcups bindings for back- and side-channel operations and a portable installer that detects CUPS paths.
+The implementation is a Python backend using Bleak and `dbus-fast`, with typed libcups bindings for back- and side-channel operations and a portable installer that detects CUPS paths.
 
 ## 15. Release definition
 

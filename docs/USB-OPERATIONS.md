@@ -12,9 +12,13 @@ lpinfo -v
 ```
 
 Install the project filter and generated PPD, then create a separately named
-test queue using the discovered `usb://` URI. Start with one small job using
-the default `w53h70` media. Do not retry after any bytes may have reached the
-printer; inspect the paper and queue state manually before another attempt.
+test queue using the discovered `usb://` URI. The default `w53h70` media
+(approximately 53 × 70 mm), `w110h146` (approximately 110 × 146 mm), and a
+custom 2.25 in (57.15 mm) width have been successfully tested over the USB and
+BLE paths. Start with one small job using the default `w53h70` media. Do not
+retry after any bytes may have reached the printer; inspect the paper and queue
+state manually before another attempt. These results do not establish
+arbitrary custom heights, full-bleed output, or maximum printable width.
 
 The `lpinfo -v` output contains complete device records such as:
 

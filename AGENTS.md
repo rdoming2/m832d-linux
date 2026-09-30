@@ -1,7 +1,8 @@
 # Repository guidance
 
-This directory contains an experimental M832D image sender and the CUPS BLE
-backend that is being developed from it. `M832D-BLE-Backend-BRD.md` is the
+This directory contains the M832D CUPS driver, raster filter, and
+BLE backend, plus secondary historical protocol-research tools. The
+implementation is functional and maturing; `M832D-BLE-Backend-BRD.md` is the
 requirements baseline.
 
 ## Safety and scope
