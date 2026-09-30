@@ -12,6 +12,11 @@ from .options import Options, parse_options
 from .side_channel import CupsSideChannel
 
 
+RASTER_DPI = 300
+USB_SETTLE_MM_PER_SECOND = 8.0
+USB_SETTLE_MAX_SECONDS = 60.0
+
+
 def _black_rows(page: Page, threshold: int):
     if page.bits_per_pixel == 1:
         for source in (page.pixels[i:i + page.bytes_per_line]
@@ -90,13 +95,18 @@ def _page_output(page: Page, options: Options, has_next):
             output.extend(FOOTER)
         else:
             output.extend(feed(options.feed))
-    return bytes(output)
+    return bytes(output), len(rows)
 
 
-def _page_outputs(stream, options):
+def _converted_pages(stream, options):
     pages = read_pages(stream)
     for page_number, page in enumerate(pages):
         yield _page_output(page, options, page_number + 1 < len(pages))
+
+
+def _page_outputs(stream, options):
+    for output, _ in _converted_pages(stream, options):
+        yield output
 
 
 def convert(stream, options: Options):
@@ -125,22 +135,34 @@ def _ble_ready(output, stream, timeout=3.0):
     raise RuntimeError("M832D BLE readiness query received no 1a 04 reply")
 
 
-def _write_output(stream, source, options, ble=False, drain=None, sleep=time.sleep):
-    pages = iter(_page_outputs(source, options))
+def _usb_pause_seconds(raster_rows, page_pause):
+    millimetres = raster_rows * 25.4 / RASTER_DPI
+    settling = min(
+        USB_SETTLE_MAX_SECONDS, millimetres / USB_SETTLE_MM_PER_SECOND,
+    )
+    return page_pause + settling
+
+
+def _write_output(stream, source, options, ble=False, usb=False, drain=None,
+                  sleep=time.sleep):
+    pages = iter(_converted_pages(source, options))
     page = next(pages, None)
     first = True
     while page is not None:
         next_page = next(pages, None)
+        output, raster_rows = page
         if first and ble:
-            _ble_ready(page, stream)
-            stream.write(page[3:])
+            _ble_ready(output, stream)
+            stream.write(output[3:])
         else:
-            stream.write(page)
+            stream.write(output)
         first = False
         stream.flush()
         if options.page_pause and next_page is not None:
             (drain or CupsSideChannel()).drain()
-            sleep(options.page_pause)
+            pause = (_usb_pause_seconds(raster_rows, options.page_pause)
+                     if usb else options.page_pause)
+            sleep(pause)
         page = next_page
     stream.write(FOOTER)
     stream.flush()
@@ -153,9 +175,11 @@ def main(argv=None):
         source = open(argv[-1], "rb")
     try:
         options = parse_options(argv[5] if len(argv) > 5 else "")
+        device_uri = os.environ.get("DEVICE_URI", "")
         _write_output(
             sys.stdout.buffer, source, options,
-            ble=os.environ.get("DEVICE_URI", "").startswith("m832dble://"),
+            ble=device_uri.startswith("m832dble://"),
+            usb=device_uri.startswith("usb://"),
         )
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"rastertom832d: {exc}", file=sys.stderr)

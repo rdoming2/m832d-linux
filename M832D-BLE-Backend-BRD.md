@@ -189,6 +189,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 5. Which additional media sizes, including 80 mm and A4, should be added after the validated `w53h70` and `w110h146` configurations?
 6. What full-page throughput is acceptable once measured on the current adapter?
 7. Does the filter parser tolerate notification fragmentation/coalescing as delivered by the back channel?
+8. Does the USB connection expose a repeatable status or notification that can be validated as actual page completion, allowing the empirical feed-rate allowance to be removed?
 
 These questions do not block offline implementation. They must be resolved or recorded as accepted limits at the relevant delivery gate.
 
@@ -209,6 +210,16 @@ the normal inter-page feed, and waits for a bounded host-side output drain
 before starting the timer. The drain and pause do not establish physical page
 completion; with the option disabled, the original single-footer stream
 remains unchanged.
+
+The USB path continues to use the standard CUPS `usb://` backend. Offline
+integration coverage exercises the project filter with real libcups
+side-channel framing and a simulated USB drain response; Linux/libusb CUPS
+2.4.19 is the checked backend implementation. Other platform or CUPS backend
+versions remain compatibility-validation items. Since USB drain can precede
+the end of physical printing, the USB path adds a bounded page-height settling
+allowance before the selected tear-off interval. The allowance assumes 8 mm/s
+at 300 dpi, is capped at 60 seconds, and must not be described as confirmed
+physical completion.
 - The filter's status parser assumes complete records and has competing monitor and synchronous readers. Fragmented/coalesced notification behavior and the possible reader race require harness and hardware validation.
 - The M832 output is an uncompressed `GS v 0` raster stream. The BLE backend must not LZO-compress, validate as a mobile-image envelope, or otherwise modify it.
 

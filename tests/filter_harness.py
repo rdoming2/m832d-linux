@@ -1,8 +1,10 @@
 """Subprocess harness for CUPS filter back- and side-channel behavior."""
 from dataclasses import dataclass
 import os
+import select
 import socket
 import subprocess
+import time
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,11 @@ class FilterHarness:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(timeout=2)
+        if self.process is not None:
+            for stream in (self.process.stdin, self.process.stdout,
+                           self.process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
 
     def send_notification(self, data):
         self.back.sendall(data)
@@ -78,6 +85,26 @@ class FilterHarness:
     def write_side(self, command, status, data=b''):
         header = bytes((command, status)) + len(data).to_bytes(2, 'big')
         self.side.sendall(header + data)
+
+    def stdout_ready(self, timeout=0.1):
+        ready, _, _ = select.select([self.process.stdout.fileno()], [], [], timeout)
+        return bool(ready)
+
+    def read_stdout(self, length, timeout=1.0):
+        deadline = time.monotonic() + timeout
+        result = bytearray()
+        while len(result) < length:
+            remaining = max(0.0, deadline - time.monotonic())
+            ready, _, _ = select.select(
+                [self.process.stdout.fileno()], [], [], remaining,
+            )
+            if not ready:
+                raise TimeoutError('Filter stdout did not become ready')
+            data = os.read(self.process.stdout.fileno(), length - len(result))
+            if not data:
+                raise EOFError('Filter stdout closed before the expected bytes')
+            result.extend(data)
+        return bytes(result)
 
 
 def _recv_exact(channel, length):

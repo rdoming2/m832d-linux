@@ -4,7 +4,9 @@ import struct
 import unittest
 
 from m832d_filter.cups_raster import read_pages
-from m832d_filter.filter import _ble_ready, _write_output, convert
+from m832d_filter.filter import (
+    _ble_ready, _usb_pause_seconds, _write_output, convert,
+)
 from m832d_filter.options import parse_options
 from m832d_filter.side_channel import CupsSideChannel
 
@@ -60,6 +62,11 @@ class FilterTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 parse_options(f"M832DPagePause={value}")
 
+    def test_usb_pause_adds_bounded_page_settling_allowance(self):
+        # 827 rows is approximately 70 mm at the fixed 300 dpi resolution.
+        self.assertAlmostEqual(_usb_pause_seconds(827, 10), 18.75, places=1)
+        self.assertEqual(_usb_pause_seconds(65535, 10), 70.0)
+
     def test_page_pause_finalizes_each_page_without_extra_feed(self):
         page = raster(8, 1, b"\0\xff\xff\xff\xff\xff\xff\xff")
         source = page + page[4:]
@@ -83,7 +90,7 @@ class FilterTests(unittest.TestCase):
         # Incremental output matches the pause-enabled conversion exactly.
         self.assertEqual(actual.getvalue(), expected)
         self.assertEqual(events.count("drain"), 1)
-        self.assertIn(5, events)
+        self.assertEqual(events[:3], ["flush", "drain", 5])
         boundary = b"\x1bd\x02\x1bd\x02" + b"\x1f\x11\x08"
         self.assertIn(boundary, actual.getvalue())
         self.assertNotIn(b"\x1bd\x06" + boundary, actual.getvalue())
@@ -105,6 +112,19 @@ class FilterTests(unittest.TestCase):
         CupsSideChannel(fd=1, library=library).drain()
         self.assertEqual(library.cupsSideChannelDoRequest.args[0], 2)
         self.assertEqual(library.cupsSideChannelDoRequest.args[3], 65.0)
+
+    def test_side_channel_rejects_failure_and_missing_descriptor(self):
+        class Call:
+            def __call__(self, *args):
+                return 7
+
+        class Library:
+            cupsSideChannelDoRequest = Call()
+
+        with self.assertRaisesRegex(RuntimeError, "status 7"):
+            CupsSideChannel(fd=1, library=Library()).drain()
+        with self.assertRaisesRegex(RuntimeError, "unavailable"):
+            CupsSideChannel(fd=9999, library=Library()).drain()
 
     def test_accepts_cupsfilter_little_endian_magic(self):
         source = raster(8, 1, b"\0\xff\xff\xff\xff\xff\xff\xff", magic=b"3SaR")

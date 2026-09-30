@@ -21,6 +21,10 @@ class DriverTests(unittest.TestCase):
             self.assertIn("rastertom832d", text)
             self.assertIn("M832DPagePause", text)
             self.assertIn("*DefaultM832DPagePause: 0", text)
+            for value, label in (("0", "Off"), ("5", "5 seconds"),
+                                 ("10", "10 seconds"), ("20", "20 seconds"),
+                                 ("30", "30 seconds")):
+                self.assertIn(f"*M832DPagePause {value}/{label}", text)
             self.assertNotIn("rastertoM08F", text)
             hardware_margins = re.search(r'\*HWMargins: ([^\n]+)', text)
             self.assertIsNotNone(hardware_margins)

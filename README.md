@@ -187,6 +187,16 @@ paused pages. The same option is available on the separate USB queue. The drain
 fences host-side transport only, and the elapsed pause does not confirm physical
 print completion.
 
+On USB this uses the standard CUPS backend's `DRAIN_OUTPUT` side-channel
+operation; support has been checked against the Linux/libusb backend in CUPS
+2.4.19. Existing queues retain their installed PPD copy, so verify that the
+separate project USB queue lists `M832DPagePause` before relying on it. USB also
+adds a bounded page-height settling allowance, based on a conservative 8 mm/s
+at 300 dpi, before the selected tear-off interval because transport drain can
+precede the end of physical printing. This remains timing policy, not physical
+completion detection. USB status traffic still needs investigation to determine
+whether a validated page-complete signal can replace the feed-rate estimate.
+
 ## Install the CUPS components
 
 ### Build the generated PPD

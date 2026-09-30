@@ -49,8 +49,27 @@ sudo lpadmin -p M832D-USB -E \
 The shared filter supports `M832DPagePause=5`, `10`, `20`, or `30` seconds for
 manual tear-off between pages; the default is `Off`. For a paused job, each
 page receives the captured footer instead of an additional normal inter-page
-feed before a bounded output drain and the timer. Transfer acknowledgement, the
-drain, and CUPS job completion do not confirm physical print completion.
+feed before a bounded output drain. Because the printer continues physically
+printing after USB transfer completes, the USB path then adds a bounded
+page-height allowance before the selected tear-off interval. The allowance
+assumes a conservative 8 mm/s at the fixed 300 dpi resolution and is capped at
+60 seconds. It is an empirical timing allowance, not physical-completion
+detection. Transfer acknowledgement, the drain, the allowance, and CUPS job
+completion do not confirm physical print completion.
+
+Further USB protocol research is required to determine whether the connection
+provides a reliable status or notification that identifies actual page
+completion. If such a signal can be validated against physical output, it
+should replace the feed-rate estimate as the start of the configured tear-off
+interval.
+
+This path relies on the standard CUPS USB backend implementing
+`CUPS_SC_CMD_DRAIN_OUTPUT`; the Linux/libusb backend in CUPS 2.4.19 has been
+checked for that support. Other CUPS versions or platform USB backends require
+separate validation. An existing queue keeps its installed PPD copy, so merely
+reinstalling the model PPD may not add `M832DPagePause` to an older queue. Check
+the option list below before printing, and do not alter the queue without
+explicit approval.
 
 Verify the new queue without printing:
 
@@ -58,6 +77,10 @@ Verify the new queue without printing:
 lpstat -v M832D-USB
 lpoptions -p M832D-USB -l
 ```
+
+The option list for the project queue should include `M832DPagePause`. If it
+does not, stop and inspect the queue's selected model rather than modifying the
+manufacturer queue.
 
 USB transfer acknowledgement or CUPS completion is not confirmation of
 physical print completion. If the printer exposes a non-standard interface,
