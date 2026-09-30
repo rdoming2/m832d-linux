@@ -12,6 +12,7 @@ class Options:
     rotation: int = 0
     offset_x: int = 0
     offset_y: int = 0
+    page_pause: int = 0
 
 
 def parse_options(raw):
@@ -20,7 +21,7 @@ def parse_options(raw):
     aliases = {"M832DDensity": "density", "M832DHeat": "heat",
                "M832DThreshold": "threshold", "M832DFeed": "feed",
                "M832DRotation": "rotation", "M832DOffsetX": "offset_x",
-               "M832DOffsetY": "offset_y"}
+               "M832DOffsetY": "offset_y", "M832DPagePause": "page_pause"}
     fields = result.__dict__.copy()
     for key, name in aliases.items():
         if key in values:
@@ -42,4 +43,6 @@ def parse_options(raw):
         raise ValueError("threshold or feed is outside its supported range")
     if fields["rotation"] not in (0, 90, 180, 270):
         raise ValueError("rotation must be 0, 90, 180, or 270")
+    if fields["page_pause"] not in (0, 5, 10, 20, 30):
+        raise ValueError("page pause must be 0, 5, 10, 20, or 30 seconds")
     return Options(**fields)

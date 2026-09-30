@@ -19,6 +19,8 @@ class DriverTests(unittest.TestCase):
             self.assertTrue(ppd.exists())
             text = ppd.read_text()
             self.assertIn("rastertom832d", text)
+            self.assertIn("M832DPagePause", text)
+            self.assertIn("*DefaultM832DPagePause: 0", text)
             self.assertNotIn("rastertoM08F", text)
             hardware_margins = re.search(r'\*HWMargins: ([^\n]+)', text)
             self.assertIsNotNone(hardware_margins)

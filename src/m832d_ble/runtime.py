@@ -2,6 +2,7 @@
 import asyncio
 import errno
 import os
+import select
 import stat
 
 from .channels import SideCommand, SideStatus
@@ -26,7 +27,7 @@ class TransferTracker:
             self.acknowledged += count
             self.changed.notify_all()
 
-    async def wait_acknowledged(self, barrier, timeout=0.08):
+    async def wait_acknowledged(self, barrier, timeout=60.0):
         async def wait():
             async with self.changed:
                 await self.changed.wait_for(
@@ -36,29 +37,46 @@ class TransferTracker:
                     raise self.failed
         await asyncio.wait_for(wait(), timeout)
 
-    async def capture_drain_barrier(self, quiet_period=0.01):
-        """Include bytes flushed just before a request on the separate fd 4."""
-        observed = self.produced
-        while not self.finished and self.failed is None:
+    async def capture_drain_barrier(self, source=None):
+        """Fence bytes already in the filter pipe before replying to drain."""
+        if source is None:
+            observed = self.produced
+            while not self.finished and self.failed is None:
+                try:
+                    async with self.changed:
+                        await asyncio.wait_for(
+                            self.changed.wait_for(lambda: self.produced != observed),
+                            0.01,
+                        )
+                        observed = self.produced
+                except TimeoutError:
+                    break
+            return self.produced
+        if source is not None:
             try:
-                async with self.changed:
-                    await asyncio.wait_for(
-                        self.changed.wait_for(lambda: self.produced != observed),
-                        quiet_period,
-                    )
-                    observed = self.produced
-            except TimeoutError:
-                break
+                mode = os.fstat(source.fileno()).st_mode
+            except (AttributeError, OSError):
+                mode = 0
+            if stat.S_ISFIFO(mode):
+                while not self.finished and self.failed is None:
+                    ready, _, _ = select.select([source.fileno()], [], [], 0)
+                    if not ready:
+                        break
+                    await asyncio.sleep(0)
+            else:
+                await asyncio.sleep(0)
         return self.produced
 
 
 class BackendRuntime:
-    def __init__(self, transport, channels, source, cancel_event, queue_chunks=16):
+    def __init__(self, transport, channels, source, cancel_event, queue_chunks=16,
+                 drain_timeout=60.0):
         self.transport = transport
         self.channels = channels
         self.source = source
         self.cancel_event = cancel_event
         self.queue = asyncio.Queue(maxsize=queue_chunks)
+        self.drain_timeout = drain_timeout
         self.notifications = asyncio.Queue(maxsize=64)
         self.tracker = TransferTracker()
         self.connected = True
@@ -220,9 +238,9 @@ class BackendRuntime:
                 continue
             self._side_idle.clear()
             if request.command == SideCommand.DRAIN_OUTPUT:
-                barrier = await self.tracker.capture_drain_barrier()
+                barrier = await self.tracker.capture_drain_barrier(self.source)
                 try:
-                    await self.tracker.wait_acknowledged(barrier)
+                    await self.tracker.wait_acknowledged(barrier, self.drain_timeout)
                     status, data = SideStatus.OK, b''
                 except TimeoutError:
                     status, data = SideStatus.TIMEOUT, b''

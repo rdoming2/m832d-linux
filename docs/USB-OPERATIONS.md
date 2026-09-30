@@ -46,6 +46,12 @@ sudo lpadmin -p M832D-USB -E \
   -o printer-error-policy=stop-printer
 ```
 
+The shared filter supports `M832DPagePause=5`, `10`, `20`, or `30` seconds for
+manual tear-off between pages; the default is `Off`. For a paused job, each
+page receives the captured footer instead of an additional normal inter-page
+feed before a bounded output drain and the timer. Transfer acknowledgement, the
+drain, and CUPS job completion do not confirm physical print completion.
+
 Verify the new queue without printing:
 
 ```sh

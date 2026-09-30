@@ -4,8 +4,9 @@ import struct
 import unittest
 
 from m832d_filter.cups_raster import read_pages
-from m832d_filter.filter import _ble_ready, convert
+from m832d_filter.filter import _ble_ready, _write_output, convert
 from m832d_filter.options import parse_options
+from m832d_filter.side_channel import CupsSideChannel
 
 
 def raster(width, height, pixels, bits=8, magic=b"RaS2"):
@@ -52,6 +53,58 @@ class FilterTests(unittest.TestCase):
             "M832DRotation=90")
         self.assertEqual((options.density, options.heat, options.threshold,
                           options.rotation), (4, 0x20, 128, 90))
+
+    def test_page_pause_options_are_bounded(self):
+        self.assertEqual(parse_options("M832DPagePause=20").page_pause, 20)
+        for value in ("1", "6", "31", "-5"):
+            with self.assertRaises(ValueError):
+                parse_options(f"M832DPagePause={value}")
+
+    def test_page_pause_finalizes_each_page_without_extra_feed(self):
+        page = raster(8, 1, b"\0\xff\xff\xff\xff\xff\xff\xff")
+        source = page + page[4:]
+        options = parse_options("M832DPagePause=5 M832DFeed=6")
+        expected = convert(io.BytesIO(source), options)
+        output = io.BytesIO()
+        events = []
+
+        class Drain:
+            def drain(self):
+                events.append("drain")
+
+        class Output(io.BytesIO):
+            def flush(self):
+                events.append("flush")
+                super().flush()
+
+        actual = Output()
+        _write_output(actual, io.BytesIO(source), options, drain=Drain(),
+                      sleep=lambda seconds: events.append(seconds))
+        # Incremental output matches the pause-enabled conversion exactly.
+        self.assertEqual(actual.getvalue(), expected)
+        self.assertEqual(events.count("drain"), 1)
+        self.assertIn(5, events)
+        boundary = b"\x1bd\x02\x1bd\x02" + b"\x1f\x11\x08"
+        self.assertIn(boundary, actual.getvalue())
+        self.assertNotIn(b"\x1bd\x06" + boundary, actual.getvalue())
+        self.assertEqual(actual.getvalue().count(b"\x1bd"), 4)
+
+    def test_side_channel_uses_bounded_cups_request(self):
+        class Call:
+            def __init__(self):
+                self.args = None
+
+            def __call__(self, *args):
+                self.args = args
+                return 1
+
+        class Library:
+            cupsSideChannelDoRequest = Call()
+
+        library = Library()
+        CupsSideChannel(fd=1, library=library).drain()
+        self.assertEqual(library.cupsSideChannelDoRequest.args[0], 2)
+        self.assertEqual(library.cupsSideChannelDoRequest.args[3], 65.0)
 
     def test_accepts_cupsfilter_little_endian_magic(self):
         source = raster(8, 1, b"\0\xff\xff\xff\xff\xff\xff\xff", magic=b"3SaR")

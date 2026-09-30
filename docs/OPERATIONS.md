@@ -141,6 +141,14 @@ a BLE release target. For custom media, the filter does not append an additional
 page feed after the final raster; its configured feed is used only between
 pages.
 
+For manual tear-off, select `M832DPagePause=5`, `10`, `20`, or `30` seconds;
+`0`/`Off` is the default. The pause applies only between pages and is available
+on both the BLE and separately named USB queues. For a paused job, the filter
+ends each page with the captured footer instead of adding the normal
+inter-page feed as well, then waits for a bounded output drain before starting
+the timer. The drain fences host-side transport only; it and the elapsed pause
+do not confirm that the page has physically finished printing.
+
 The generated PPD declares custom media, including a 2.25-inch-wide page, full
 page imageable. A4 and Letter retain their declared hardware margins. The
 2.25-inch width has been physically tested over USB and BLE, but this is not

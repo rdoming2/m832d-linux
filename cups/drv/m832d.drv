@@ -62,4 +62,10 @@ MaxSize 216mm 0mm
   Option "M832DOffsetY/Vertical offset" PickOne AnySetup 10
   *Choice "0/0" ""
   Choice "8/8" ""
+  Option "M832DPagePause/Pause between pages" PickOne DocumentSetup 10
+  *Choice "0/Off" ""
+  Choice "5/5 seconds" ""
+  Choice "10/10 seconds" ""
+  Choice "20/20 seconds" ""
+  Choice "30/30 seconds" ""
 }

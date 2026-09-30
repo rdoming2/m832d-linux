@@ -200,6 +200,15 @@ Source inspection established these requirements for the M832 branch:
 - The backend must forward each FF03 value as raw bytes, without ATT framing, hexadecimal encoding, or delimiters.
 - The filter uses CUPS side-channel fd 4 and requests output drains after status queries, setup, raster headers, and raster blocks. Raster-path drain requests use an approximately 100 ms timeout.
 - A successful drain means all filter bytes preceding the request have completed acknowledged transport writes. It is not evidence that the printer has physically completed a page.
+
+The shared filter exposes an optional bounded `M832DPagePause` setting
+(`Off`, 5, 10, 20, or 30 seconds) for manual tear-off. It is disabled by
+default and applies only between pages on BLE and USB paths. For a paused job,
+the filter terminates each page with the captured footer instead of also adding
+the normal inter-page feed, and waits for a bounded host-side output drain
+before starting the timer. The drain and pause do not establish physical page
+completion; with the option disabled, the original single-footer stream
+remains unchanged.
 - The filter's status parser assumes complete records and has competing monitor and synchronous readers. Fragmented/coalesced notification behavior and the possible reader race require harness and hardware validation.
 - The M832 output is an uncompressed `GS v 0` raster stream. The BLE backend must not LZO-compress, validate as a mobile-image envelope, or otherwise modify it.
 

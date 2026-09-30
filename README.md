@@ -177,6 +177,16 @@ or manufacturer queue. Deployment is an explicit administrator action; follow
 The installer does not create queues, pair the printer, set BlueZ preferences,
 change D-Bus policy, restart CUPS, or install Python dependencies.
 
+The driver also provides `M832DPagePause`, with choices `Off`, `5`, `10`, `20`,
+or `30` seconds. It is disabled by default and can be selected per job, for
+example `lp -d M832D-BLE -o M832DPagePause=10 document.pdf`. For a multi-page
+job the filter ends each page with the captured footer, waits for a bounded
+backend output drain, and then pauses before sending the next page. It does not
+add the normal inter-page feed as well, avoiding additional paper length on
+paused pages. The same option is available on the separate USB queue. The drain
+fences host-side transport only, and the elapsed pause does not confirm physical
+print completion.
+
 ## Install the CUPS components
 
 ### Build the generated PPD

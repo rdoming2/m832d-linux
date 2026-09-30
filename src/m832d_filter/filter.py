@@ -9,6 +9,7 @@ from m832d_protocol import FOOTER, build_setup, feed, raster_block
 
 from .cups_raster import Page, read_pages
 from .options import Options, parse_options
+from .side_channel import CupsSideChannel
 
 
 def _black_rows(page: Page, threshold: int):
@@ -76,19 +77,32 @@ def _transform(rows, width, height, options: Options):
     return width, matrix
 
 
-def convert(stream, options: Options):
-    output = bytearray()
+def _page_output(page: Page, options: Options, has_next):
+    rows = list(_black_rows(page, options.threshold))
+    width, rows = _transform(rows, page.width, page.height, options)
+    output = bytearray(build_setup(options.density, options.heat))
+    row_bytes = (width + 7) // 8
+    for start in range(0, len(rows), 65535):
+        block = b"".join(rows[start:start + 65535])
+        output.extend(raster_block(row_bytes, len(rows[start:start + 65535]), block))
+    if has_next:
+        if options.page_pause:
+            output.extend(FOOTER)
+        else:
+            output.extend(feed(options.feed))
+    return bytes(output)
+
+
+def _page_outputs(stream, options):
     pages = read_pages(stream)
     for page_number, page in enumerate(pages):
-        rows = list(_black_rows(page, options.threshold))
-        width, rows = _transform(rows, page.width, page.height, options)
-        output.extend(build_setup(options.density, options.heat))
-        row_bytes = (width + 7) // 8
-        for start in range(0, len(rows), 65535):
-            block = b"".join(rows[start:start + 65535])
-            output.extend(raster_block(row_bytes, len(rows[start:start + 65535]), block))
-        if page_number + 1 < len(pages):
-            output.extend(feed(options.feed))
+        yield _page_output(page, options, page_number + 1 < len(pages))
+
+
+def convert(stream, options: Options):
+    output = bytearray()
+    for page in _page_outputs(stream, options):
+        output.extend(page)
     output.extend(FOOTER)
     return bytes(output)
 
@@ -111,6 +125,27 @@ def _ble_ready(output, stream, timeout=3.0):
     raise RuntimeError("M832D BLE readiness query received no 1a 04 reply")
 
 
+def _write_output(stream, source, options, ble=False, drain=None, sleep=time.sleep):
+    pages = iter(_page_outputs(source, options))
+    page = next(pages, None)
+    first = True
+    while page is not None:
+        next_page = next(pages, None)
+        if first and ble:
+            _ble_ready(page, stream)
+            stream.write(page[3:])
+        else:
+            stream.write(page)
+        first = False
+        stream.flush()
+        if options.page_pause and next_page is not None:
+            (drain or CupsSideChannel()).drain()
+            sleep(options.page_pause)
+        page = next_page
+    stream.write(FOOTER)
+    stream.flush()
+
+
 def main(argv=None):
     argv = sys.argv if argv is None else argv
     source = sys.stdin.buffer
@@ -118,13 +153,11 @@ def main(argv=None):
         source = open(argv[-1], "rb")
     try:
         options = parse_options(argv[5] if len(argv) > 5 else "")
-        output = convert(source, options)
-        if os.environ.get("DEVICE_URI", "").startswith("m832dble://"):
-            _ble_ready(output, sys.stdout.buffer)
-            sys.stdout.buffer.write(output[3:])
-        else:
-            sys.stdout.buffer.write(output)
-    except (OSError, ValueError) as exc:
+        _write_output(
+            sys.stdout.buffer, source, options,
+            ble=os.environ.get("DEVICE_URI", "").startswith("m832dble://"),
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"rastertom832d: {exc}", file=sys.stderr)
         return 1
     finally:

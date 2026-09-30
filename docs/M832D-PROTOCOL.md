@@ -10,6 +10,13 @@ local M832D captures and offline encoder:
 3. A bounded `ESC d n` feed between pages, followed by the existing
    two-command footer. The final page is not followed by the inter-page feed.
 
+The filter may optionally pause for 5, 10, 20, or 30 seconds after the
+page. For a paused job, it terminates each page with the complete captured
+footer instead of also adding the normal inter-page feed, waits for a bounded
+host-side output drain, and then starts the timer. The drain does not establish
+physical print completion. With the pause disabled, the original single-footer
+stream remains unchanged.
+
 The filter resolves CUPS options before constructing this stream and never
 performs USB or BLE I/O. The BLE backend therefore remains byte-transparent.
 

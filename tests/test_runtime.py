@@ -100,15 +100,43 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await tracker.capture_drain_barrier(), 3)
         await producer
 
+    async def test_drain_barrier_waits_for_pipe_data_to_be_consumed(self):
+        read_fd, write_fd = os.pipe()
+        source = os.fdopen(read_fd, 'rb', buffering=0)
+        tracker = TransferTracker()
+        os.write(write_fd, b'x')
+        task = asyncio.create_task(tracker.capture_drain_barrier(source))
+        await asyncio.sleep(0.01)
+        self.assertFalse(task.done())
+        os.read(read_fd, 1)
+        await asyncio.sleep(0)
+        tracker.finished = True
+        self.assertEqual(await asyncio.wait_for(task, 0.5), 0)
+        source.close()
+        os.close(write_fd)
+
     async def test_drain_returns_timeout_before_stale_response(self):
         channels = FakeChannels([SideRequest(SideCommand.DRAIN_OUTPUT, b'')])
         runtime = BackendRuntime(
             FakeTransport(delay=0.2), channels, BytesIO(b'x' * 4096),
-            asyncio.Event(),
+            asyncio.Event(), drain_timeout=0.05,
         )
         await runtime.run()
         self.assertIn(
             (SideCommand.DRAIN_OUTPUT, SideStatus.TIMEOUT, b''),
+            channels.responses,
+        )
+
+    async def test_drain_allows_slow_full_page_acknowledgement(self):
+        channels = FakeChannels([SideRequest(SideCommand.DRAIN_OUTPUT, b'')])
+        payload = bytes(range(256)) * 80
+        runtime = BackendRuntime(
+            FakeTransport(delay=0.01), channels, BytesIO(payload),
+            asyncio.Event(), queue_chunks=2, drain_timeout=1.0,
+        )
+        await runtime.run()
+        self.assertIn(
+            (SideCommand.DRAIN_OUTPUT, SideStatus.OK, b''),
             channels.responses,
         )
 
