@@ -73,6 +73,12 @@ and releasing or resubmitting the held job; bond removal is never automatic.
 Queue creation is an administrator deployment action. After installing the
 backend, list CUPS device records:
 
+Graphical CUPS setup tools that use backend discovery can list an advertising
+M832D automatically, making basic single-adapter setup simple without manually
+constructing its URI. Still verify the printer address, and select the adapter
+explicitly when multiple adapters are available. The equivalent command-line
+discovery is:
+
 ```sh
 lpinfo -v
 ```

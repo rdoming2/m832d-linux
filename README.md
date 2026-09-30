@@ -131,6 +131,10 @@ property as `le` before pairing or connecting.
 
 ## CUPS backend and filter
 
+On the tested setup, text printed with the project `rastertom832d` filter
+appeared sharper than text produced by the manufacturer-supplied
+`rastertoM08F` filter. In general, artifacts are reduced significantly.
+
 Backend device URIs contain an explicit Bluetooth address. Specify the adapter
 as well when multiple adapters are available or reproducibility is required:
 
@@ -189,13 +193,12 @@ print completion.
 
 On USB this uses the standard CUPS backend's `DRAIN_OUTPUT` side-channel
 operation; support has been checked against the Linux/libusb backend in CUPS
-2.4.19. Existing queues retain their installed PPD copy, so verify that the
-separate project USB queue lists `M832DPagePause` before relying on it. USB also
-adds a bounded page-height settling allowance, based on a conservative 8 mm/s
-at 300 dpi, before the selected tear-off interval because transport drain can
-precede the end of physical printing. This remains timing policy, not physical
-completion detection. USB status traffic still needs investigation to determine
-whether a validated page-complete signal can replace the feed-rate estimate.
+2.4.19. USB also adds a bounded page-height settling allowance, based on a 
+conservative 8 mm/s at 300 dpi, before the selected tear-off interval because 
+transport drain can precede the end of physical printing. This remains timing 
+policy, not physical completion detection. USB status traffic still needs 
+investigation to determine whether a validated page-complete signal can replace 
+the feed-rate estimate.
 
 ## Install the CUPS components
 
@@ -351,6 +354,11 @@ hardware test.
 
 After the backend is installed, BLE discovery through CUPS reports candidate
 device URIs. Discovery does not pair the printer:
+
+Graphical CUPS setup tools that use backend discovery can therefore list an
+advertising M832D automatically, making basic single-adapter setup simple
+without manually constructing its URI. Still verify the printer address, and
+select the adapter explicitly when multiple adapters are available.
 
 ```sh
 lpinfo -v
