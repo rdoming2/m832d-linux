@@ -128,6 +128,9 @@ with a random address are also LE-only and can use `Device1.Connect`. An existin
 public-address device instead requires `ConnectDevice` or an
 available `PreferredBearer` property. The print pipeline sets and verifies that
 property as `le` before pairing or connecting.
+The connected-device recovery path is compatible with the older Bleak API
+shipped by Raspbian Trixie, so a stale connected BlueZ object does not require
+removing the printer bond before the next job.
 
 ## CUPS backend and filter
 
@@ -473,6 +476,9 @@ tests depend on optional CUPS tools or system libraries.
 - Existing public-address devices require BlueZ `ConnectDevice` support or an
   available `PreferredBearer` property that the backend can set to `le`. Fresh
   automatic pairing and random-address LE devices do not require those APIs.
+- `bluetoothctl --experimental` is not a backend requirement. Experimental
+  BlueZ daemon APIs may still be required for existing public-address dual-mode
+  devices when LE cannot otherwise be selected explicitly.
 - Classic PPD/filter workflows are deprecated in newer CUPS releases.
 - Backend queues are bounded, but the current raster filter constructs the
   converted output in memory.

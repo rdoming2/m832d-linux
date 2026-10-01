@@ -12,7 +12,8 @@ from m832d_ble.model import (
 )
 from m832d_ble.transport import (
     BleTransport, connect_with_provisioned_le, ensure_preferred_le,
-    ensure_trusted, explicit_le_connect, find_connected_device,
+    ensure_trusted, explicit_le_connect, find_connected_device, _make_ble_device,
+    _scanner_options,
 )
 
 
@@ -44,6 +45,45 @@ class ManagedFakeClient:
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    def test_ble_device_constructor_supports_current_api(self):
+        class CurrentDevice:
+            def __init__(self, address, name, details):
+                self.values = (address, name, details)
+
+        device = _make_ble_device(CurrentDevice, 'address', 'name', {}, -42)
+        self.assertEqual(device.values, ('address', 'name', {}))
+
+    def test_ble_device_constructor_supports_legacy_api_and_rssi(self):
+        class LegacyDevice:
+            def __init__(self, address, name, details, rssi):
+                self.values = (address, name, details, rssi)
+
+        device = _make_ble_device(LegacyDevice, 'address', 'name', {}, -42)
+        self.assertEqual(device.values, ('address', 'name', {}, -42))
+
+    def test_ble_device_constructor_preserves_missing_rssi_fallback(self):
+        class LegacyDevice:
+            def __init__(self, address, name, details, rssi):
+                self.rssi = rssi
+
+        device = _make_ble_device(LegacyDevice, 'address', 'name', {}, -127)
+        self.assertEqual(device.rssi, -127)
+
+    def test_ble_device_constructor_does_not_hide_other_type_errors(self):
+        class BrokenDevice:
+            def __init__(self, address, name, details):
+                raise TypeError('invalid details')
+
+        with self.assertRaisesRegex(TypeError, 'invalid details'):
+            _make_ble_device(BrokenDevice, 'address', 'name', {}, -42)
+
+    def test_scanner_options_keep_le_filter_and_explicit_adapter(self):
+        options = _scanner_options(DeviceConfig('D6:4D:F2:16:B6:BF', adapter='hci1'))
+        self.assertEqual(options, {
+            'adapter': 'hci1',
+            'bluez': {'filters': {'Transport': 'le'}},
+        })
+
     async def test_close_stops_notifications_and_confirms_owned_disconnect(self):
         transport = BleTransport(DeviceConfig('D6:4D:F2:16:B6:BF'), lambda data: None)
         client = ManagedFakeClient()
@@ -190,6 +230,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
                                 'AddressType': SimpleNamespace(value='random'),
                                 'Alias': SimpleNamespace(value='M832D'),
                                 'Connected': SimpleNamespace(value=True),
+                                'RSSI': SimpleNamespace(value=-42),
                             },
                         },
                     }],
@@ -203,6 +244,7 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
             device = await find_connected_device(config)
         self.assertEqual(device.address, config.address)
         self.assertEqual(device.details['path'], path)
+        self.assertEqual(device.details['props']['RSSI'], -42)
 
     async def test_pairing_precedes_explicit_le_connection(self):
         events = []

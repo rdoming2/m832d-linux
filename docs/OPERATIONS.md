@@ -7,12 +7,20 @@ manufacturer USB queue until USB and BLE acceptance testing are complete.
 ## Supported baseline
 
 Initial development used CUPS 2.4.19, BlueZ 5.87, Python 3.14, Bleak 3.0.2,
-and dbus-fast 5.0.22. Other versions are not yet validated. The backend prefers
+and dbus-fast 5.0.22. The transport also supports the older Bleak API shipped
+by Raspbian Trixie, including recovery of an already-connected device between
+jobs. Other combinations remain subject to validation. The backend prefers
 BlueZ `ConnectDevice`, but it can reuse a fresh LE pairing connection or connect
 an existing random-address LE device without experimental BlueZ APIs. An
 existing public-address device still requires `ConnectDevice` or a verified
 `PreferredBearer=le` setting so Classic cannot be selected silently. The print
 pipeline provisions and verifies that device property when it is available.
+
+The backend does not use `bluetoothctl`, so `bluetoothctl --experimental` is
+not required. Some BlueZ daemon experimental APIs (`ConnectDevice` and
+`PreferredBearer`) may still be needed for an existing public-address dual-mode
+device; random-address LE devices can use the explicit LE fallbacks when those
+APIs are unavailable.
 
 ## Install
 
