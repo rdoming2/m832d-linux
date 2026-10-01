@@ -38,13 +38,11 @@ class BleTransport:
         # discovery timeout.
         device = await find_connected_device(self.config)
         if device is None:
-            scanner_options = {'filters': {'Transport': 'le'}}
-            if self.config.adapter:
-                scanner_options['adapter'] = self.config.adapter
+            scanner_options = _scanner_options(self.config)
             device = await BleakScanner.find_device_by_filter(
                 lambda found, advertisement: found.address.lower() == self.config.address.lower(),
                 timeout=self.config.scan_timeout,
-                bluez=scanner_options,
+                **scanner_options,
             )
         if device is None:
             raise RuntimeError(
@@ -320,13 +318,35 @@ async def find_connected_device(config):
             address_type = props.get('AddressType')
             if address_type not in ('public', 'random'):
                 continue
-            return BLEDevice(
+            return _make_ble_device(
+                BLEDevice,
                 config.address, props.get('Alias') or props.get('Name') or '',
                 {'path': path, 'props': props},
+                props.get('RSSI', -127),
             )
         return None
     finally:
         bus.disconnect()
+
+
+def _make_ble_device(device_type, address, name, details, rssi):
+    """Construct a Bleak device across legacy and current Bleak APIs."""
+    try:
+        return device_type(address, name, details)
+    except TypeError as exc:
+        text = str(exc)
+        if 'missing' not in text or 'required positional argument' not in text \
+                or "'rssi'" not in text:
+            raise
+        return device_type(address, name, details, rssi=rssi)
+
+
+def _scanner_options(config):
+    """Build scanner arguments accepted by legacy and current Bleak."""
+    options = {'bluez': {'filters': {'Transport': 'le'}}}
+    if config.adapter:
+        options['adapter'] = config.adapter
+    return options
 
 
 async def device_connected_path(path):

@@ -112,7 +112,7 @@ Successful CUPS delivery and confirmed physical print completion must be disting
 - **Security:** restrict scanning, pairing-agent callbacks, bearer preference, trust changes, and connections to the configured device and LE bearer. Automatic Just Works enrollment has no human confirmation or meaningful MITM protection, so administrators must verify the complete address before queue creation. Do not log keys, passkeys, document contents, or raw raster payloads by default. Use the minimum permissions required by the CUPS execution context.
 - **Maintainability:** separate CUPS adaptation, BLE transport, and status policy; document version assumptions and protocol evidence. Runtime changes must have a clear rollback path.
 - **Observability:** log job identifier, stage, bytes submitted/acknowledged, transport configuration, elapsed time, and actionable errors. Detailed notification logging is opt-in or appropriately bounded.
-- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Prefer experimental BlueZ bearer-selection APIs when available, reuse a fresh pairing connection or unambiguous random-address LE device when they are absent, and provide clear errors for ambiguous public-address devices.
+- **Compatibility:** document tested Linux, BlueZ, CUPS, Python, and Bleak versions. Support the legacy Bleak device-construction API used by Raspbian Trixie, while preferring experimental BlueZ bearer-selection APIs when available. Reuse a fresh pairing connection or unambiguous random-address LE device when those APIs are absent, and provide clear errors for ambiguous public-address devices.
 - **Resource management:** close connections and descriptors, release locks, and handle broken pipes and process termination without leaving the printer permanently unavailable.
 
 ## 10. Integration constraints and design boundaries
@@ -190,7 +190,7 @@ Record software versions, printer firmware if obtainable, document identity, opt
 
 ## 14. Open decisions
 
-1. The initial validation environment is CUPS 2.4.19, BlueZ 5.87, Python 3.14, and Bleak 3.0.2. The portable installer must check and report actual versions; broader compatibility remains to be established.
+1. The initial validation environment is CUPS 2.4.19, BlueZ 5.87, Python 3.14, and Bleak 3.0.2. Offline compatibility coverage now includes the older Bleak device API used by Raspbian Trixie; the portable installer must check and report actual versions, and hardware validation on that platform remains to be established.
 2. Installation builds the project-owned GPLv3 filter and PPD. The manufacturer queue and local artifacts under `research/artifacts/local/` remain separate reference material.
 3. What status evidence can establish readiness and completion for this printer firmware?
 4. Which CUPS error policy best exposes partial-job uncertainty without automatic reprinting?
