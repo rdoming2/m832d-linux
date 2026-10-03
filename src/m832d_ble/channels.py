@@ -36,6 +36,12 @@ class SideRequest:
 
 
 class CupsChannels:
+    """Synchronous libcups ABI for CUPS descriptors 3 and 4.
+
+    The runtime calls these bounded operations through worker threads.  FF03
+    values are written raw to the printer-to-filter back channel (fd 3), where a
+    partial write is an error; side-channel requests and responses use fd 4.
+    """
     def __init__(self, library=None, back_fd=3, side_fd=4):
         self.back_fd = back_fd
         self.side_fd = side_fd

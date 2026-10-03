@@ -27,6 +27,12 @@ class CupsSideChannel:
         return ctypes.CDLL(name, use_errno=True)
 
     def drain(self, timeout=65.0):
+        """Request one bounded CUPS output drain before the next page.
+
+        Success means the active backend completed its output-drain operation,
+        not that paper output completed.  Any other CUPS status is fatal; the
+        default slightly exceeds this project's BLE backend barrier timeout.
+        """
         try:
             os.fstat(self.fd)
         except OSError as exc:

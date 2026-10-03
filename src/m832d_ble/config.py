@@ -10,6 +10,13 @@ ADAPTER_RE = re.compile(r'^hci[0-9]+$')
 
 @dataclass(frozen=True)
 class DeviceConfig:
+    """Validated transport bounds for one explicitly addressed printer.
+
+    The 182-byte default is the tested acknowledged-write ceiling, not a claim
+    about every negotiated MTU.  These values bound scanning, Bleak setup,
+    pairing, and individual writes rather than the complete job lifecycle;
+    lower-level BlueZ calls have their own bounds.
+    """
     address: str
     adapter: str | None = None
     chunk_size: int = 182
@@ -19,6 +26,7 @@ class DeviceConfig:
 
     @property
     def lock_key(self):
+        """Serialize all adapter-qualified URIs for the same printer address."""
         return self.address.replace(':', '').lower()
 
 

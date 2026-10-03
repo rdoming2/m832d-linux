@@ -56,6 +56,12 @@ def _black_rows(page: Page, threshold: int, rendering="atkinson"):
 
 
 def _transform(rows, width, height, options: Options):
+    """Apply offsets and rotation while preserving MSB-first packed pixels.
+
+    Positive X/Y offsets prepend white pixels/rows, negative Y crops leading
+    rows, and rotation expands to pixel flags before repacking.  The returned
+    matrix, rather than the input height, defines the transformed height.
+    """
     matrix = [bytearray(row) for row in rows]
     if options.offset_x:
         shift = options.offset_x
@@ -94,6 +100,13 @@ def _transform(rows, width, height, options: Options):
 
 
 def _page_output(page: Page, options: Options, has_next):
+    """Frame one page without the job's final footer.
+
+    Setup is repeated per page.  GS v 0 has a 16-bit height, so rows are split
+    into blocks of at most 65,535 while preserving their packed byte order.  A
+    normal intermediate page receives only its configured feed; pause mode uses
+    the complete footer before draining.  The caller owns the one final footer.
+    """
     rows = list(_black_rows(page, options.threshold, options.rendering))
     width, rows = _transform(rows, page.width, page.height, options)
     output = bytearray(build_setup(options.density, options.heat))
@@ -121,6 +134,7 @@ def _page_outputs(stream, options):
 
 
 def convert(stream, options: Options):
+    """Convert the currently buffered raster job to one complete command stream."""
     output = bytearray()
     for page in _page_outputs(stream, options):
         output.extend(page)
@@ -129,7 +143,13 @@ def convert(stream, options: Options):
 
 
 def _ble_ready(output, stream, timeout=3.0):
-    """Emit the confirmed BLE readiness query and await its notification."""
+    """Emit the first setup command once and await its observed BLE response.
+
+    The opaque back-channel stream is searched for the observed ``1a 04``
+    response before the remaining page bytes are emitted.  This is the bounded
+    response currently used to gate transmission; its broader status meaning is
+    not established and it does not prove health or completion.
+    """
     stream.write(output[:3])
     stream.flush()
     deadline = time.monotonic() + timeout
@@ -147,6 +167,12 @@ def _ble_ready(output, stream, timeout=3.0):
 
 
 def _usb_pause_seconds(raster_rows, page_pause):
+    """Add a capped empirical USB paper-settling allowance.
+
+    CUPS drain can precede mechanical output, so USB estimates page travel at
+    300 dpi and 8 mm/s.  This conservative delay is not completion detection;
+    BLE uses only the configured pause.
+    """
     millimetres = raster_rows * 25.4 / RASTER_DPI
     settling = min(
         USB_SETTLE_MAX_SECONDS, millimetres / USB_SETTLE_MM_PER_SECOND,
@@ -156,6 +182,14 @@ def _usb_pause_seconds(raster_rows, page_pause):
 
 def _write_output(stream, source, options, ble=False, usb=False, drain=None,
                   sleep=time.sleep):
+    """Emit framed pages in order while enforcing page-pause boundaries.
+
+    BLE sends the three-byte setup query first, waits for the observed response,
+    then resumes at byte three without duplication.  Before an inter-page pause,
+    flush and complete the active CUPS backend's drain operation; failure
+    prevents the next page.
+    Neither that drain nor the following delay proves physical completion.
+    """
     pages = iter(_converted_pages(source, options))
     page = next(pages, None)
     first = True

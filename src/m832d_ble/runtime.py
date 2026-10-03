@@ -10,6 +10,12 @@ from .model import CancelledError
 
 
 class TransferTracker:
+    """Track a host-side drain fence, not printer processing or completion.
+
+    ``produced`` counts bytes removed from filter input; ``acknowledged`` counts
+    bytes whose complete transport write returned successfully.  A recorded
+    failure wakes drain waiters rather than leaving them blocked.
+    """
     def __init__(self):
         self.produced = 0
         self.acknowledged = 0
@@ -38,7 +44,14 @@ class TransferTracker:
         await asyncio.wait_for(wait(), timeout)
 
     async def capture_drain_barrier(self, source=None):
-        """Fence bytes already in the filter pipe before replying to drain."""
+        """Fence bytes already in the filter pipe before replying to drain.
+
+        Filter output and side-channel requests use separate descriptors, so a
+        drain request can be observed just before earlier pipe data.  For FIFOs,
+        yield until currently readable input has been consumed; other sources use
+        a short scheduling/quiescence fence.  The returned produced-byte count is
+        not evidence of physical print completion.
+        """
         if source is None:
             observed = self.produced
             while not self.finished and self.failed is None:
@@ -69,6 +82,13 @@ class TransferTracker:
 
 
 class BackendRuntime:
+    """Coordinate a bounded, ordered data pipeline with CUPS channels.
+
+    One producer and consumer preserve source order through a bounded data queue.
+    FF03 values remain opaque and ordered in a separate bounded queue; overflow
+    is fatal rather than silently dropping status bytes.  Side- and back-channel
+    pumps run concurrently with transmission.
+    """
     def __init__(self, transport, channels, source, cancel_event, queue_chunks=16,
                  drain_timeout=60.0):
         self.transport = transport
@@ -88,6 +108,7 @@ class BackendRuntime:
         self.back_channel_closed = False
 
     def notification(self, data):
+        """Queue one opaque FF03 value without assigning it status meaning."""
         if self._stopping.is_set():
             return
         try:
@@ -97,6 +118,7 @@ class BackendRuntime:
             self._channel_failed.set()
 
     async def run(self):
+        """Supervise transfer and channel tasks, then stop all remaining work."""
         producer = asyncio.create_task(self._produce())
         consumer = asyncio.create_task(self._consume())
         notifications = asyncio.create_task(self._notification_pump())
@@ -118,8 +140,8 @@ class BackendRuntime:
                     await task
                     data_tasks.remove(task)
 
-            # Allow a final side-channel read cycle and forward every
-            # notification accepted before successful transport shutdown.
+            # These bounded waits are flush opportunities for accepted channel
+            # work, not printer-completion waits.
             self._side_idle.clear()
             await asyncio.wait_for(self._side_idle.wait(), 0.2)
             if self._channel_failed.is_set():
@@ -142,6 +164,7 @@ class BackendRuntime:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _produce(self):
+        """Read fixed chunks into the bounded queue and account before enqueue."""
         try:
             while not self.cancel_event.is_set():
                 data = await self._read_chunk()
@@ -162,6 +185,7 @@ class BackendRuntime:
                 await self.queue.put(None)
 
     async def _read_chunk(self):
+        """Read files in a worker, but keep pipe reads cancellable by readiness."""
         try:
             fd = self.source.fileno()
             mode = os.fstat(fd).st_mode
@@ -192,6 +216,7 @@ class BackendRuntime:
             await asyncio.gather(cancelled, return_exceptions=True)
 
     async def _consume(self):
+        """Perform one ordered transport write at a time with no requeue."""
         self.transmitting = True
         try:
             while True:
@@ -210,6 +235,7 @@ class BackendRuntime:
             self.transmitting = False
 
     async def _notification_pump(self):
+        """Forward raw notification values to CUPS fd 3 in callback order."""
         while not self._stopping.is_set():
             data = await self.notifications.get()
             try:
@@ -238,6 +264,8 @@ class BackendRuntime:
                 continue
             self._side_idle.clear()
             if request.command == SideCommand.DRAIN_OUTPUT:
+                # OK fences acknowledged transport writes preceding this request;
+                # it neither parses printer state nor confirms physical output.
                 barrier = await self.tracker.capture_drain_barrier(self.source)
                 try:
                     await self.tracker.wait_acknowledged(barrier, self.drain_timeout)

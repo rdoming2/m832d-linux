@@ -2,6 +2,7 @@
 
 import numbers
 
+# The confirmed job/page terminator is two ESC d 2 feed commands.
 FOOTER = bytes.fromhex("1b6402 1b6402")
 
 
@@ -12,7 +13,14 @@ def _byte(value, name):
 
 
 def build_setup(density=2, heat=0x37, media=0x0b, compression=0):
-    """Return the raw-mode setup used by the M832D CUPS path."""
+    """Return the confirmed setup sequence used by the M832D CUPS path.
+
+    Heat, density, and compression are the only confirmed variable bytes;
+    production uses compression zero for raw GS v 0 payloads.  ``media`` remains
+    an API compatibility placeholder because the confirmed sequence does not
+    encode a variable media value.  Transports must forward this framing without
+    interpreting or modifying it.
+    """
     return (b"\x1f\x11\x08" + b"\x1f\x117" + _byte(heat, "heat") +
             b"\xaa\xab\xac\x02" + b"\x1f\x11\x02" + _byte(density, "density") +
             b"\x1f\x11\x0b" + b"\x1f\x1135" + _byte(compression, "compression"))

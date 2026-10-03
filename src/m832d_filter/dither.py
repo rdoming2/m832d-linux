@@ -3,6 +3,9 @@
 
 _SCALE = 4096
 _MIDPOINT = 128 * _SCALE
+# Integer error diffusion keeps output deterministic across platforms.  Diffusion
+# uses a fixed luminance midpoint; the configurable threshold applies only to the
+# simple threshold renderer below.
 
 
 def _round_division(value, divisor):
@@ -13,6 +16,7 @@ def _round_division(value, divisor):
 
 
 def _diffuse(rows, algorithm):
+    """Diffuse error with serpentine traversal and mirrored horizontal weights."""
     width = len(rows[0]) if rows else 0
     current = [0] * width
     next_row = [0] * width
@@ -27,6 +31,8 @@ def _diffuse(rows, algorithm):
             black = adjusted < _MIDPOINT
             output[x] = 1 if black else 0
             error = adjusted - (0 if black else 255 * _SCALE)
+            # Floyd-Steinberg reaches the current/next rows.  Atkinson also
+            # carries error two rows ahead; odd rows mirror horizontal offsets.
             if algorithm == "floyd-steinberg":
                 neighbors = ((x + (-1 if reverse else 1), 7),
                              (x + (1 if reverse else -1), 3),

@@ -33,6 +33,7 @@ def parse_invocation(argv):
 
 
 async def discover(timeout=5.0):
+    """List advertised M832D candidates; print jobs still select by address."""
     from bleak import BleakScanner
 
     devices = await BleakScanner.discover(
@@ -48,6 +49,15 @@ async def discover(timeout=5.0):
 
 
 async def run_job(invocation, config, channels=None, transport_factory=BleTransport):
+    """Run one serialized job and map uncertainty to conservative CUPS exits.
+
+    Failures requiring administrator setup hold the job, cancellation reports
+    cancellation, and ordinary failures are retryable only while no write has
+    been submitted.  Once a write may have reached the printer, including when
+    teardown subsequently fails, replay could duplicate output and the queue is
+    stopped instead.  Success establishes host-side delivery only, never
+    physical print completion.
+    """
     started = time.monotonic()
     cancel_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -74,11 +84,16 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
 
     try:
         source = open(invocation.filename, 'rb') if invocation.filename else sys.stdin.buffer
+        # Keep the per-printer lock through connection teardown.  Releasing it
+        # sooner could let another backend interleave with an uncertain session.
         with PrinterLock(config.lock_key):
             try:
                 info(f'job {invocation.job_id}: connecting to configured LE printer')
                 state(add='connecting-to-device')
                 connecting = True
+                # Notifications cannot arrive until connect() subscribes, after
+                # runtime has been assigned, so this closure is safe despite the
+                # construction order.
                 transport = transport_factory(
                     config, lambda data: runtime.notification(data), cancel_event,
                     pairing_status,
@@ -89,6 +104,8 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
                 done, _ = await asyncio.wait(
                     {connect_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
                 )
+                # Cancellation wins a simultaneous race so transmission cannot
+                # begin merely because connection setup also completed.
                 if cancel_task in done and cancel_task.result():
                     connect_task.cancel()
                     await asyncio.gather(connect_task, return_exceptions=True)
@@ -136,6 +153,9 @@ async def run_job(invocation, config, channels=None, transport_factory=BleTransp
         return BackendExit.CANCEL
     except Exception as exc:
         submitted = transport.submitted_bytes if transport is not None else 0
+        # Submission is counted before awaiting the ATT response.  Any positive
+        # count therefore means delivery is uncertain and automatic replay is
+        # unsafe, regardless of how many bytes were acknowledged.
         if submitted:
             acknowledged = transport.acknowledged_bytes
             error(

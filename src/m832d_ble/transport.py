@@ -13,6 +13,14 @@ NOTIFY_UUID = '0000ff03-0000-1000-8000-00805f9b34fb'
 
 
 class BleTransport:
+    """Exact-address, explicit-LE transport for one ordered byte stream.
+
+    Characteristics are resolved by UUID for each connection and writes are
+    serialized with ATT responses; no transport retry is performed.  A byte is
+    ``submitted`` before its write is awaited because an error cannot prove
+    non-delivery, and is ``acknowledged`` only after that await succeeds.  Both
+    counters describe host-side transport, not physical printing.
+    """
     def __init__(
             self, config, notification_callback, cancel_event=None,
             pairing_callback=None, allow_pairing=True):
@@ -31,6 +39,7 @@ class BleTransport:
         self.acknowledged_bytes = 0
 
     async def connect(self):
+        """Select the exact LE device and establish the required GATT channels."""
         from bleak import BleakClient, BleakScanner
 
         # A connected printer may stop advertising. Check BlueZ first so the
@@ -75,6 +84,9 @@ class BleTransport:
                     'LE authentication failed; automatic pairing or bond recovery is required'
                 ) from exc
             raise
+        # ATT handles vary by device and connection, so captured numeric handles
+        # are never production configuration.  Acknowledged FF02 writes and FF03
+        # notifications are required before any job bytes are accepted.
         self.write_characteristic = self.client.services.get_characteristic(WRITE_UUID)
         self.notify_characteristic = self.client.services.get_characteristic(NOTIFY_UUID)
         if self.write_characteristic is None or self.notify_characteristic is None:
@@ -98,6 +110,12 @@ class BleTransport:
             raise exc
 
     async def close(self):
+        """Perform bounded teardown and report an unverified owned disconnect.
+
+        Cleanup continues after individual failures so notifications, Bleak, and
+        the exact BlueZ connection all get a chance to close.  Local state is
+        reset before raising because callers use cleanup failure in retry policy.
+        """
         client = self.client
         device_path = self.device_path
         owns_connection = self.owns_connection
@@ -142,12 +160,16 @@ class BleTransport:
             pass
 
     async def write(self, data):
+        """Write opaque bytes sequentially, without delay, framing, or retry."""
         if self.client is None or self.write_characteristic is None:
             raise RuntimeError('BLE transport is not connected')
         for offset in range(0, len(data), self.config.chunk_size):
             if self.cancel_event.is_set():
                 raise CancelledError('Job cancelled; already accepted data may still print')
             chunk = data[offset:offset + self.config.chunk_size]
+            # Advance before the await: timeout, cancellation, or an error leaves
+            # peripheral receipt uncertain.  ATT success still does not establish
+            # that the printer physically processed the bytes.
             self.submitted_bytes += len(chunk)
             try:
                 await _wait_or_cancel(
@@ -157,7 +179,6 @@ class BleTransport:
                     self.cancel_event, self.config.write_timeout, 'write',
                 )
             except Exception:
-                # submitted_bytes deliberately remains advanced: the peripheral may have received it.
                 raise
             self.acknowledged_bytes += len(chunk)
 
@@ -168,7 +189,15 @@ class BleTransport:
 async def explicit_le_connect(
         device, configured_adapter=None, cancel_event=None, pair_timeout=25.0,
         allow_pairing=False, pairing_callback=None):
-    """Use BlueZ APIs that select LE explicitly; never use a generic bearer fallback."""
+    """Connect the exact BlueZ device without an ambiguous bearer fallback.
+
+    An existing exact-address connection is adopted.  Otherwise this prefers
+    Adapter1.ConnectDevice, permits generic Device1.Connect only for a sole new
+    LE bond, a random address, or verified PreferredBearer=le, and fails closed
+    for an ambiguous public-address device.  Pairing and connection each receive
+    one bounded attempt; connections created during a failed attempt receive a
+    best-effort rollback.
+    """
     from dbus_fast import Message, MessageType, Variant, BusType
     from dbus_fast.aio import MessageBus
 
@@ -192,6 +221,8 @@ async def explicit_le_connect(
     )
 
     async def call(interface, member, signature='', body=None, target=path):
+        # Cap every D-Bus call independently and normalize BlueZ error replies so
+        # only explicit unsupported-capability errors enter fallback branches.
         reply = await asyncio.wait_for(bus.call(Message(
             destination='org.bluez', path=target, interface=interface,
             member=member, signature=signature, body=body or [],
@@ -473,6 +504,12 @@ async def connect_with_provisioned_le(call):
 
 
 async def _wait_or_cancel(awaitable, cancel_event, timeout, operation):
+    """Race one bounded operation against cancellation without retrying it.
+
+    Cancellation wins if both tasks complete together.  Abandoned work is
+    cancelled and awaited so no write or connection attempt survives the result;
+    after a timeout the remote side may nevertheless already have acted.
+    """
     operation_task = asyncio.create_task(awaitable)
     cancellation_task = asyncio.create_task(cancel_event.wait())
     try:

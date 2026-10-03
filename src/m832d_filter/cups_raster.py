@@ -34,6 +34,12 @@ def _text(value):
 
 
 def read_pages(stream, max_page_bytes=128 * 1024 * 1024):
+    """Parse and validate all CUPS Raster pages from the supported deployment.
+
+    The complete stream and every returned page remain in memory; the size limit
+    applies per page, not to aggregate job memory.  Header dimensions and stride
+    are validated before payload slicing, and partial headers/pages are rejected.
+    """
     data = stream.read()
     if len(data) < 4 or data[:4] not in (b"RaS1", b"RaS2", b"RaS3", b"RaS4",
                                           b"1SaR", b"2SaR", b"3SaR", b"4SaR"):
@@ -49,6 +55,8 @@ def read_pages(stream, max_page_bytes=128 * 1024 * 1024):
             raise ValueError("truncated CUPS raster header")
         values = struct.unpack_from(page_format, data, position)
         position += 1796
+        # Indices follow cups_page_header2_t; named geometry, color, copy, and
+        # orientation fields plus values[64:80] are retained for compatibility.
         width, height = values[33], values[34]
         bits_color, bits_pixel, bytes_line = values[36:39]
         color_space, num_colors = values[40], values[45]

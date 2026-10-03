@@ -7,6 +7,12 @@ import tempfile
 
 
 class PrinterLock:
+    """Prevent backend processes from interleaving bytes for one printer.
+
+    Contention fails immediately rather than waiting or retrying.  The private
+    owner-only directory, no-follow open where available, and post-open regular
+    file/owner checks reject unsafe ownership, file types, and symlinks.
+    """
     def __init__(self, key, directory=None):
         configured = directory or os.environ.get('M832D_BLE_LOCK_DIR')
         root = Path(configured) if configured else Path(tempfile.gettempdir()) / f'm832dble-{os.getuid()}'

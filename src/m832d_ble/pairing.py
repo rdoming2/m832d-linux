@@ -16,7 +16,13 @@ LE_BEARER_INTERFACE = 'org.bluez.Bearer.LE1'
 
 
 class ExactDeviceAgent(ServiceInterface):
-    """A temporary Just Works agent that rejects every other device."""
+    """Temporary exact-device Just Works authorization without credentials.
+
+    Confirmation and authorization are accepted only for the configured object
+    path.  PIN, passkey, and display flows are rejected because the backend does
+    not support interactive credentials.  The agent is never made BlueZ's
+    default agent.
+    """
 
     def __init__(self, device_path):
         super().__init__(AGENT_INTERFACE)
@@ -71,7 +77,14 @@ class ExactDeviceAgent(ServiceInterface):
 
 
 async def pairing_state(call, device_path, discovered_props=None):
-    """Return paired state, preferring an exported LE bearer when available."""
+    """Return verified paired state, preferring exported LE bearer state.
+
+    Every exported LE bearer must be paired, and explicit ``Bonded=False``
+    invalidates ``Paired=True``; absent Bonded is tolerated for older BlueZ.
+    Unsupported inspection APIs and inconclusive successful replies fall through
+    to less detailed state.  Permission and other inspection failures do not
+    silently trust stale discovery properties.
+    """
     discovered_props = discovered_props or {}
     try:
         reply = await call(
@@ -125,7 +138,14 @@ async def pairing_state(call, device_path, discovered_props=None):
 async def ensure_paired(
         bus, call, device_path, discovered_props, cancel_event, timeout,
         pairing_callback=None):
-    """Pair once through a temporary non-default agent and verify the result."""
+    """Pair once through a temporary non-default agent and verify the LE bond.
+
+    Pairing is refused when existing bond state cannot be inspected.  Completion
+    is rechecked before returning, and timeout/cancellation requests
+    CancelPairing.  Cleanup attempts to unregister and unexport the temporary
+    agent; unregister errors are suppressed.  Trust is deliberately applied
+    later, only after verification.
+    """
     try:
         paired = await pairing_state(call, device_path, discovered_props)
     except PairingRequiredError:
@@ -194,6 +214,7 @@ async def ensure_paired(
 
 
 async def _wait_for_pairing(awaitable, cancel_event, timeout):
+    """Bound the sole Pair call and distinguish cancellation from failure."""
     pairing_task = asyncio.create_task(awaitable)
     cancellation_task = asyncio.create_task(cancel_event.wait())
     try:
