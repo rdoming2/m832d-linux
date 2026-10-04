@@ -104,12 +104,12 @@ def _page_output(page: Page, options: Options, has_next):
 
     Setup is repeated per page.  GS v 0 has a 16-bit height, so rows are split
     into blocks of at most 65,535 while preserving their packed byte order.  A
-    normal intermediate page receives only its configured feed; pause mode uses
+    normal intermediate page receives only the fixed feed; pause mode uses
     the complete footer before draining.  The caller owns the one final footer.
     """
     rows = list(_black_rows(page, options.threshold, options.rendering))
     width, rows = _transform(rows, page.width, page.height, options)
-    output = bytearray(build_setup(options.density, options.heat))
+    output = bytearray(build_setup(options.density))
     row_bytes = (width + 7) // 8
     for start in range(0, len(rows), 65535):
         block = b"".join(rows[start:start + 65535])
@@ -118,7 +118,7 @@ def _page_output(page: Page, options: Options, has_next):
         if options.page_pause:
             output.extend(FOOTER)
         else:
-            output.extend(feed(options.feed))
+            output.extend(feed())
     return bytes(output), len(rows)
 
 

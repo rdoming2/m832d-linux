@@ -36,14 +36,11 @@ MaxSize 216mm 0mm
   Attribute "NickName" "" "Phomemo M832D"
   ModelName "M832D"
   PCFileName "Phomemo-M832D.ppd"
-  Option "M832DDensity/Density" PickOne DocumentSetup 10
-  *Choice "Default/Default" ""
-  Choice "Light/Light" ""
-  Choice "Heavy/Heavy" ""
-  Option "M832DHeat/Heat" PickOne DocumentSetup 10
-  *Choice "Default/Default" ""
-  Choice "Slow/Slow" ""
-  Choice "Fast/Fast" ""
+  Option "M832DDarkness/Darkness" PickOne DocumentSetup 10
+   *Choice "Default/Default" ""
+   Choice "Fine/Fine" ""
+   Choice "Medium/Medium" ""
+   Choice "Thick/Thick" ""
   Option "M832DThreshold/Threshold" PickOne AnySetup 10
   *Choice "160/160" ""
   Choice "128/128" ""
@@ -52,9 +49,6 @@ MaxSize 216mm 0mm
   *Choice "Atkinson/Atkinson" ""
   Choice "FloydSteinberg/Floyd-Steinberg" ""
   Choice "Threshold/Binary threshold" ""
-  Option "M832DFeed/Feed" PickOne DocumentSetup 10
-  *Choice "2/2" ""
-  Choice "6/6" ""
   Option "M832DRotation/Rotation" PickOne AnySetup 10
   *Choice "0/0" ""
   Choice "90/90" ""

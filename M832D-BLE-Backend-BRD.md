@@ -230,6 +230,7 @@ at 300 dpi, is capped at 60 seconds, and must not be described as confirmed
 physical completion.
 - The filter's status parser assumes complete records and has competing monitor and synchronous readers. Fragmented/coalesced notification behavior and the possible reader race require harness and hardware validation.
 - The M832 output is an uncompressed `GS v 0` raster stream. The BLE backend must not LZO-compress, validate as a mobile-image envelope, or otherwise modify it.
+- The project filter exposes Darkness as its density control. Heat and Feed are not exposed because the retained factory evidence does not establish independent mappings; fixed protocol defaults remain part of the stream contract.
 
 The implementation is a Python backend using Bleak and `dbus-fast`, with typed libcups bindings for back- and side-channel operations and a portable installer that detects CUPS paths.
 

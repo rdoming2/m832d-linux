@@ -21,6 +21,13 @@ class DriverTests(unittest.TestCase):
             self.assertIn("rastertom832d", text)
             self.assertIn("M832DPagePause", text)
             self.assertIn("M832DRendering", text)
+            self.assertIn("M832DDarkness", text)
+            self.assertNotIn("M832DHeat", text)
+            self.assertNotIn("M832DFeed", text)
+            self.assertIn("*DefaultM832DDarkness: Default", text)
+            for value, label in (("Default", "Default"), ("Fine", "Fine"),
+                                 ("Medium", "Medium"), ("Thick", "Thick")):
+                self.assertIn(f"*M832DDarkness {value}/{label}", text)
             self.assertIn("*DefaultM832DRendering: Atkinson", text)
             for value, label in (("Atkinson", "Atkinson"),
                                  ("FloydSteinberg", "Floyd-Steinberg"),

@@ -149,6 +149,13 @@ The physical printer remains monochrome; grayscale refers to the source raster
 and its halftone rendering. The historical standalone encoder remains a
 threshold-only utility.
 
+The project driver exposes `M832DDarkness` (`Default`, `Fine`, `Medium`, and
+`Thick`) as the maintained density control. The old `M832DDensity` option is
+accepted as a compatibility alias. Heat and Feed are intentionally not exposed:
+their factory meanings and independent wire mappings are not established by
+the available PPD/capture evidence, so the filter retains its existing heat
+default and fixed inter-page feed framing.
+
 On the tested setup, text printed with the project `rastertom832d` filter
 appeared sharper than text produced by the manufacturer-supplied
 `rastertoM08F` filter. In general, artifacts are reduced significantly.

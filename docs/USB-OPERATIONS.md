@@ -61,6 +61,10 @@ assumes a conservative 8 mm/s at the fixed 300 dpi resolution and is capped at
 detection. Transfer acknowledgement, the drain, the allowance, and CUPS job
 completion do not confirm physical print completion.
 
+`M832DDarkness` is the only thermal/density control exposed by the project PPD.
+Heat and Feed are not exposed because their factory meanings are not
+established; inter-page feed remains the fixed `ESC d 2` protocol command.
+
 Further USB protocol research is required to determine whether the connection
 provides a reliable status or notification that identifies actual page
 completion. If such a signal can be validated against physical output, it

@@ -41,27 +41,38 @@ class FilterTests(unittest.TestCase):
         self.assertEqual(output.count(b"\x1bd"), 2)
         self.assertTrue(output.endswith(b"\x1bd\x02\x1bd\x02"))
 
-    def test_feed_separates_pages_but_not_final_page(self):
+    def test_fixed_feed_separates_pages_but_not_final_page(self):
         page = raster(8, 1, b"\0\xff\xff\xff\xff\xff\xff\xff")
         source = page + page[4:]
         output = convert(io.BytesIO(source), parse_options("M832DFeed=6"))
         self.assertEqual(output.count(b"\x1bd"), 3)
-        self.assertIn(b"\x1bd\x06\x1f\x11\x08", output)
+        self.assertIn(b"\x1bd\x02\x1f\x11\x08", output)
         self.assertTrue(output.endswith(b"\x1bd\x02\x1bd\x02"))
 
     def test_options(self):
         options = parse_options(
-            "M832DDensity=Heavy M832DHeat=Slow M832DThreshold=128 "
+            "M832DDarkness=Thick M832DThreshold=128 "
             "M832DRotation=90 M832DRendering=FloydSteinberg")
-        self.assertEqual((options.density, options.heat, options.threshold,
+        self.assertEqual((options.density, options.threshold,
                           options.rotation, options.rendering),
-                         (4, 0x20, 128, 90, "floyd-steinberg"))
+                         (4, 128, 90, "floyd-steinberg"))
+
+    def test_darkness_choices_and_legacy_density_alias(self):
+        self.assertEqual(parse_options("M832DDarkness=Fine").density, 1)
+        self.assertEqual(parse_options("M832DDarkness=Medium").density, 2)
+        self.assertEqual(parse_options("M832DDarkness=Thick").density, 4)
+        self.assertEqual(parse_options("M832DDensity=Heavy").density, 4)
+
+    def test_heat_and_feed_options_are_no_longer_controls(self):
+        options = parse_options("M832DHeat=Fast M832DFeed=6")
+        self.assertEqual(options, parse_options(""))
 
     def test_default_rendering_is_atkinson(self):
         self.assertEqual(parse_options("").rendering, "atkinson")
         source = raster(8, 1, b"\x80" * 8)
         output = convert(io.BytesIO(source), parse_options(""))
-        self.assertIn(b"\x33", output)
+        self.assertIn(b"\x1f\x11\x35\x00", output)
+        self.assertNotIn(b"\x1f\x11\x33\x35", output)
 
     def test_rendering_option_rejects_unknown_value(self):
         with self.assertRaises(ValueError):
